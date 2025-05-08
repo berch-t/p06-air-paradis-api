@@ -25,7 +25,7 @@ L'API utilise les variables d'environnement suivantes :
 
 ```bash
 # Cloner le dépôt
-git clone [URL_DU_REPO]
+git clone https://github.com/berch-t/p06-air-paradis-api.git
 
 # Installer les dépendances
 pip install -r requirements.txt
