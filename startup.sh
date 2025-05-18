@@ -16,6 +16,11 @@ ls -la
 # Create log directory if it doesn't exist
 mkdir -p logs
 
+# Ensure dependencies are installed
+echo "Installing required packages..."
+pip install -r requirements.txt
+pip install gunicorn streamlit
+
 # Start the API directly with Python instead of gunicorn
 echo "Starting API server..."
 python application.py > logs/api.log 2>&1 &
@@ -39,6 +44,10 @@ else
     sleep 10
 fi
 
+# Verify streamlit is available
+which streamlit || echo "Streamlit not found in PATH"
+pip list | grep streamlit
+
 # Start the Streamlit app
 echo "Starting Streamlit app..."
-streamlit run app.py --server.port=8501 --server.address=0.0.0.0
+python -m streamlit run app.py --server.port=8501 --server.address=0.0.0.0

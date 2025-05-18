@@ -30,6 +30,11 @@ ls -la
 # Create log directory if it doesn't exist
 mkdir -p logs
 
+# Ensure dependencies are installed
+echo "Installing required packages..."
+pip install -r requirements.txt
+pip install gunicorn streamlit
+
 # Start the API directly with Python instead of gunicorn
 echo "Starting API server..."
 python application.py > logs/api.log 2>&1 &
@@ -53,9 +58,13 @@ else
     sleep 10
 fi
 
+# Verify streamlit is available
+which streamlit || echo "Streamlit not found in PATH"
+pip list | grep streamlit
+
 # Start the Streamlit app
 echo "Starting Streamlit app..."
-streamlit run app.py --server.port=8501 --server.address=0.0.0.0
+python -m streamlit run app.py --server.port=8501 --server.address=0.0.0.0
 EOL
 
 chmod +x deployment_package/startup.sh
@@ -72,7 +81,7 @@ cat > deployment_package/web.config << 'EOL'
                   arguments=""
                   stdoutLogEnabled="true"
                   stdoutLogFile="%home%\LogFiles\stdout"
-                  startupTimeLimit="180">
+                  startupTimeLimit="300">
       <environmentVariables>
         <environmentVariable name="PORT" value="%HTTP_PLATFORM_PORT%" />
         <environmentVariable name="PYTHONPATH" value="%home%\site\wwwroot" />
@@ -90,5 +99,19 @@ EOL
 
 # Create a runtime.txt file to specify Python version
 echo "python-3.9" > deployment_package/runtime.txt
+
+# Ensure application.py has UTF-8 encoding header
+cat > deployment_package/application.py << 'EOL'
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+from api import app
+import os
+
+# Point d'entrée pour Azure Web App
+if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)
+EOL
 
 echo "Deployment package prepared successfully!"

@@ -44,17 +44,17 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
           
-      - name: Set up App Insights alert rule
-        run: |
-          # Set up alert rule for consecutive errors
-          echo "Setting up Application Insights alert rule for model errors..."
-          az monitor alert create \
-            --name "ConsecutiveModelErrors" \
-            --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
-            --target ${{ secrets.APPINSIGHTS_RESOURCE_ID }} \
-            --custom-emails berchet.thomas@gmail.com \
-            --description "Alert when the model makes 3 consecutive incorrect predictions"
-        continue-on-error: true
+      # - name: Set up App Insights alert rule
+      #   run: |
+      #     # Set up alert rule for consecutive errors
+      #     echo "Setting up Application Insights alert rule for model errors..."
+      #     az monitor alert create \
+      #       --name "ConsecutiveModelErrors" \
+      #       --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
+      #       --target ${{ secrets.APPINSIGHTS_RESOURCE_ID }} \
+      #       --custom-emails berchet.thomas@gmail.com \
+      #       --description "Alert when the model makes 3 consecutive incorrect predictions"
+      #   continue-on-error: true
 
       - name: 'Deploy to Azure Web App'
         uses: azure/webapps-deploy@v2
