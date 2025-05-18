@@ -46,6 +46,7 @@ venv.bak/
 *.h5
 *.pkl
 *.bin
+*.pickle
 
 # Logs
 *.log
