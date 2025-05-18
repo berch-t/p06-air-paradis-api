@@ -2,6 +2,7 @@
 
 # Create deployment package directory
 mkdir -p deployment_package
+mkdir -p deployment_package/logs
 
 # Copy all necessary files
 cp -r models/ deployment_package/
@@ -18,24 +19,38 @@ export APPINSIGHTS_INSTRUMENTATION_KEY=9af56b4d-4ad5-4643-ba29-XXXXXXXXXXXX
 export API_URL=http://localhost:5000
 export API_URL_PROD=air-paradis-sentiment-api-dkceasgya2cvaehc.francecentral-01.azurewebsites.net
 export MODEL_PATH=models
+export PORT=8000
+export PYTHONPATH=/home/site/wwwroot
 
-# Start the API in the background
+# Display directory contents for debugging
+echo "Current directory: $(pwd)"
+echo "Directory contents:"
+ls -la
+
+# Create log directory if it doesn't exist
+mkdir -p logs
+
+# Start the API directly with Python instead of gunicorn
 echo "Starting API server..."
-cd /home/site/wwwroot/
-nohup gunicorn --bind=0.0.0.0:5000 --timeout 600 application:app > api.log 2>&1 &
+python application.py > logs/api.log 2>&1 &
 API_PID=$!
 echo "API server started with PID: $API_PID"
 
 # Wait for API to initialize
 echo "Waiting for API to initialize..."
-sleep 15
+sleep 20
 
-# Check if API is running
+# Check if API process is still running
 if ps -p $API_PID > /dev/null; then
     echo "API server is running correctly"
 else
-    echo "ERROR: API server failed to start"
-    exit 1
+    echo "Warning: API server process exited. Checking logs:"
+    cat logs/api.log
+    # Try to start again with more debug info
+    echo "Trying to start API again with more debug..."
+    FLASK_DEBUG=1 FLASK_ENV=development python application.py > logs/api_debug.log 2>&1 &
+    API_PID=$!
+    sleep 10
 fi
 
 # Start the Streamlit app
@@ -57,7 +72,7 @@ cat > deployment_package/web.config << 'EOL'
                   arguments=""
                   stdoutLogEnabled="true"
                   stdoutLogFile="%home%\LogFiles\stdout"
-                  startupTimeLimit="120">
+                  startupTimeLimit="180">
       <environmentVariables>
         <environmentVariable name="PORT" value="%HTTP_PLATFORM_PORT%" />
         <environmentVariable name="PYTHONPATH" value="%home%\site\wwwroot" />
@@ -74,6 +89,6 @@ command = bash startup.sh
 EOL
 
 # Create a runtime.txt file to specify Python version
-echo "python-3.12" > deployment_package/runtime.txt
+echo "python-3.9" > deployment_package/runtime.txt
 
 echo "Deployment package prepared successfully!"

@@ -48,16 +48,12 @@ jobs:
         run: |
           # Set up alert rule for consecutive errors
           echo "Setting up Application Insights alert rule for model errors..."
-          az monitor metrics alert create \
+          az monitor alert create \
             --name "ConsecutiveModelErrors" \
             --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
-            --scopes ${{ secrets.APPINSIGHTS_RESOURCE_ID }} \
-            --condition "count customEvents where name = 'IncorrectPrediction' > 3 where timeGrain = PT5M" \
-            --window-size 5m \
-            --evaluation-frequency 1m \
-            --action ${{ secrets.ACTION_GROUP_ID }} \
-            --description "Alert when the model makes 3 consecutive incorrect predictions" \
-            --severity 2
+            --target ${{ secrets.APPINSIGHTS_RESOURCE_ID }} \
+            --custom-emails berchet.thomas@gmail.com \
+            --description "Alert when the model makes 3 consecutive incorrect predictions"
         continue-on-error: true
 
       - name: 'Deploy to Azure Web App'
