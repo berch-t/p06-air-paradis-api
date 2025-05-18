@@ -135,9 +135,9 @@ def load_model() -> Tuple[Optional[tf.keras.Model], Optional[Any], Optional[Dict
     """
     try:
         # Paths to model files
-        model_path = '../models/best_advanced_model_BiLSTM_Word2Vec.h5'
-        tokenizer_path = '../models/tokenizer.pickle'
-        config_path = '../models/model_config.pickle'
+        model_path = 'models/best_advanced_model_BiLSTM_Word2Vec.h5'
+        tokenizer_path = 'models/tokenizer.pickle'
+        config_path = 'models/model_config.pickle'
         
         # Check if files exist
         if not os.path.exists(model_path):
