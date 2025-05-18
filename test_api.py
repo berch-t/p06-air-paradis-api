@@ -7,14 +7,14 @@ from unittest.mock import patch, MagicMock
 # Ajouter le répertoire parent au chemin Python pour pouvoir importer l'API
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import api
+import tests.api.api as api_backup
 
 class TestSentimentAPI(unittest.TestCase):
     """Tests unitaires pour l'API d'analyse de sentiment"""
 
     def setUp(self):
         """Configuration initiale pour les tests"""
-        self.app = api.app.test_client()
+        self.app = api_backup.app.test_client()
         self.app.testing = True
         
     def test_health_check(self):
@@ -171,7 +171,7 @@ class TestSentimentAPI(unittest.TestCase):
         ]
         
         for raw_tweet, expected_processed in test_cases:
-            self.assertEqual(api.preprocess_tweet(raw_tweet), expected_processed)
+            self.assertEqual(api_backup.preprocess_tweet(raw_tweet), expected_processed)
 
     @patch('requests.post')
     def test_send_to_appinsights_success(self, mock_post):
@@ -182,17 +182,17 @@ class TestSentimentAPI(unittest.TestCase):
         mock_post.return_value = mock_response
         
         # Configuration de la clé d'instrumentation
-        orig_key = api.APPINSIGHTS_INSTRUMENTATION_KEY
-        api.APPINSIGHTS_INSTRUMENTATION_KEY = "test-key"
+        orig_key = api_backup.APPINSIGHTS_INSTRUMENTATION_KEY
+        api_backup.APPINSIGHTS_INSTRUMENTATION_KEY = "test-key"
         
         # Appel de la fonction
-        api.send_to_appinsights("test tweet", "Positif", is_incorrect=True)
+        api_backup.send_to_appinsights("test tweet", "Positif", is_incorrect=True)
         
         # Vérification que le mock a été appelé
         self.assertTrue(mock_post.called)
         
         # Restauration de la clé d'instrumentation
-        api.APPINSIGHTS_INSTRUMENTATION_KEY = orig_key
+        api_backup.APPINSIGHTS_INSTRUMENTATION_KEY = orig_key
         
     @patch('requests.post')
     def test_send_to_appinsights_error(self, mock_post):
@@ -204,33 +204,33 @@ class TestSentimentAPI(unittest.TestCase):
         mock_post.return_value = mock_response
         
         # Configuration de la clé d'instrumentation
-        orig_key = api.APPINSIGHTS_INSTRUMENTATION_KEY
-        api.APPINSIGHTS_INSTRUMENTATION_KEY = "test-key"
+        orig_key = api_backup.APPINSIGHTS_INSTRUMENTATION_KEY
+        api_backup.APPINSIGHTS_INSTRUMENTATION_KEY = "test-key"
         
         # Appel de la fonction
-        api.send_to_appinsights("test tweet", "Positif", is_incorrect=True)
+        api_backup.send_to_appinsights("test tweet", "Positif", is_incorrect=True)
         
         # Vérification que le mock a été appelé
         self.assertTrue(mock_post.called)
         
         # Restauration de la clé d'instrumentation
-        api.APPINSIGHTS_INSTRUMENTATION_KEY = orig_key
+        api_backup.APPINSIGHTS_INSTRUMENTATION_KEY = orig_key
         
     def test_send_to_appinsights_no_key(self):
         """Test de l'envoi de télémétrie sans clé d'instrumentation"""
         # Sauvegarde de la clé d'instrumentation
-        orig_key = api.APPINSIGHTS_INSTRUMENTATION_KEY
-        api.APPINSIGHTS_INSTRUMENTATION_KEY = ""
+        orig_key = api_backup.APPINSIGHTS_INSTRUMENTATION_KEY
+        api_backup.APPINSIGHTS_INSTRUMENTATION_KEY = ""
         
         # Appel de la fonction ne devrait pas lever d'exception
         try:
-            api.send_to_appinsights("test tweet", "Positif", is_incorrect=True)
+            api_backup.send_to_appinsights("test tweet", "Positif", is_incorrect=True)
             success = True
         except Exception:
             success = False
         
         # Restauration de la clé d'instrumentation
-        api.APPINSIGHTS_INSTRUMENTATION_KEY = orig_key
+        api_backup.APPINSIGHTS_INSTRUMENTATION_KEY = orig_key
         
         self.assertTrue(success)
 
