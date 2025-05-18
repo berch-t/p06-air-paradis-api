@@ -47,8 +47,7 @@ jobs:
           fi
           
           # Login to Azure
-          az login --identity --username f3aeb9c8-86cd-4afe-9763-b9db001c7af6
-
+          az login --service-principal --username="${{ secrets.AZURE_SP_CLIENT_ID }}" --password="${{ secrets.AZURE_SP_CLIENT_SECRET }}" --tenant="${{ secrets.AZURE_TENANT_ID }}"
           
           # Set up alert rule for consecutive errors
           echo "Setting up Application Insights alert rule for model errors..."
