@@ -7,7 +7,7 @@ on:
 
 env:
   AZURE_WEBAPP_NAME: air-paradis-sentiment-api
-  PYTHON_VERSION: '3.9'  
+  PYTHON_VERSION: '3.9'
   APPINSIGHTS_INSTRUMENTATION_KEY: '${{ secrets.APPINSIGHTS_INSTRUMENTATION_KEY }}'
 
 permissions:
@@ -30,6 +30,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          pip install pytest
 
       - name: Run tests
         run: |
@@ -50,7 +51,7 @@ jobs:
           fi
           
           # Login to Azure
-          az login --service-principal -u ${{ secrets.AZURE_SP_CLIENT_ID }} -p ${{ secrets.AZURE_SP_CLIENT_SECRET }} --tenant ${{ secrets.AZURE_TENANT_ID }}
+          az login --service-principal --username ${{ secrets.AZURE_SP_CLIENT_ID }} --password ${{ secrets.AZURE_SP_CLIENT_SECRET }} --tenant ${{ secrets.AZURE_TENANT_ID }}
           
           # Set up alert rule for consecutive errors
           echo "Setting up Application Insights alert rule for model errors..."
@@ -62,7 +63,8 @@ jobs:
             --window-size 5m \
             --evaluation-frequency 1m \
             --action ${{ secrets.ACTION_GROUP_ID }} \
-            --description "Alert when the model makes 3 consecutive incorrect predictions"
+            --description "Alert when the model makes 3 consecutive incorrect predictions" \
+            --severity 2
 
       - name: 'Deploy to Azure Web App'
         uses: azure/webapps-deploy@v2

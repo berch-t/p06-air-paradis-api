@@ -21,11 +21,22 @@ export MODEL_PATH=models
 
 # Start the API in the background
 echo "Starting API server..."
+cd /home/site/wwwroot/
 nohup gunicorn --bind=0.0.0.0:5000 --timeout 600 application:app > api.log 2>&1 &
+API_PID=$!
+echo "API server started with PID: $API_PID"
 
 # Wait for API to initialize
 echo "Waiting for API to initialize..."
-sleep 10
+sleep 15
+
+# Check if API is running
+if ps -p $API_PID > /dev/null; then
+    echo "API server is running correctly"
+else
+    echo "ERROR: API server failed to start"
+    exit 1
+fi
 
 # Start the Streamlit app
 echo "Starting Streamlit app..."
@@ -46,9 +57,10 @@ cat > deployment_package/web.config << 'EOL'
                   arguments=""
                   stdoutLogEnabled="true"
                   stdoutLogFile="%home%\LogFiles\stdout"
-                  startupTimeLimit="60">
+                  startupTimeLimit="120">
       <environmentVariables>
         <environmentVariable name="PORT" value="%HTTP_PLATFORM_PORT%" />
+        <environmentVariable name="PYTHONPATH" value="%home%\site\wwwroot" />
       </environmentVariables>
     </httpPlatform>
   </system.webServer>
@@ -60,5 +72,8 @@ cat > deployment_package/.deployment << 'EOL'
 [config]
 command = bash startup.sh
 EOL
+
+# Create a runtime.txt file to specify Python version
+echo "python-3.12" > deployment_package/runtime.txt
 
 echo "Deployment package prepared successfully!"
