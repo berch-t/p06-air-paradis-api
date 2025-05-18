@@ -39,16 +39,13 @@ jobs:
           chmod +x deploy/prepare_deployment.sh
           ./deploy/prepare_deployment.sh
 
+      - name: 'Login to Azure'
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+          
       - name: Set up App Insights alert rule
         run: |
-          # Install Azure CLI if needed
-          if ! command -v az &> /dev/null; then
-            curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
-          fi
-          
-          # Login to Azure
-          az login --service-principal --username="${{ secrets.AZURE_SP_CLIENT_ID }}" --password="${{ secrets.AZURE_SP_CLIENT_SECRET }}" --tenant="${{ secrets.AZURE_TENANT_ID }}"
-          
           # Set up alert rule for consecutive errors
           echo "Setting up Application Insights alert rule for model errors..."
           az monitor metrics alert create \
@@ -61,6 +58,7 @@ jobs:
             --action ${{ secrets.ACTION_GROUP_ID }} \
             --description "Alert when the model makes 3 consecutive incorrect predictions" \
             --severity 2
+        continue-on-error: true
 
       - name: 'Deploy to Azure Web App'
         uses: azure/webapps-deploy@v2
