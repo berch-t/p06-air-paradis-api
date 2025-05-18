@@ -7,7 +7,7 @@ on:
 
 env:
   AZURE_WEBAPP_NAME: air-paradis-sentiment-api
-  PYTHON_VERSION: '3.12'  
+  PYTHON_VERSION: '3.9'  
   APPINSIGHTS_INSTRUMENTATION_KEY: '${{ secrets.APPINSIGHTS_INSTRUMENTATION_KEY }}'
 
 permissions:
