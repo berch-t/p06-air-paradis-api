@@ -21,66 +21,40 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout repository (without LFS)
         uses: actions/checkout@v3
         with:
-          lfs: true
+          lfs: false  # D'abord sans LFS pour éviter l'erreur
           fetch-depth: 0
       
-      - name: Check repository structure
-        run: |
-          echo "Examining repository structure..."
-          echo "Looking for model files in preloaded_models/bert:"
-          if [ -d "preloaded_models/bert" ]; then
-            ls -la preloaded_models/bert || echo "Empty directory"
-            if [ -d "preloaded_models/bert/best_model_bert" ]; then
-              echo "✅ Found best_model_bert directory"
-              ls -la preloaded_models/bert/best_model_bert | head -10
-            fi
-            if [ -d "preloaded_models/bert/tokenizer_bert" ]; then
-              echo "✅ Found tokenizer_bert directory"
-              ls -la preloaded_models/bert/tokenizer_bert
-            fi
-          else
-            echo "❌ preloaded_models/bert directory not found"
-          fi
-
       - name: Create deployment package
         run: |
           echo "Creating deployment package..."
           mkdir -p deployment_package
           
-          # Copying all core files as-is
+          # Copying all core files except models
           cp -r api.py app.py app_insights.py application.py init_models.py startup.sh runtime.txt .streamlit requirements.txt deployment_package/
           
-          # Check and copy web.config with modifications
-          if [ -f "web.config" ]; then
-            cp web.config deployment_package/
-            # Modify web.config to set SIMULATION_MODE to false
-            sed -i 's/<environmentVariable name="SIMULATION_MODE" value="true"\/>/<environmentVariable name="SIMULATION_MODE" value="false"\/>/' deployment_package/web.config
-            echo "Copied and modified web.config to disable simulation mode"
-          else
-            # Création du fichier web.config ligne par ligne
-            echo '<?xml version="1.0" encoding="utf-8"?>' > deployment_package/web.config
-            echo '<configuration>' >> deployment_package/web.config
-            echo '  <system.webServer>' >> deployment_package/web.config
-            echo '    <handlers>' >> deployment_package/web.config
-            echo '      <add name="PythonHandler" path="*" verb="*" modules="httpPlatformHandler" resourceType="Unspecified"/>' >> deployment_package/web.config
-            echo '    </handlers>' >> deployment_package/web.config
-            echo '    <httpPlatform processPath="%home%\python\3.9\python.exe" arguments="-m gunicorn application:app --bind=0.0.0.0:%HTTP_PLATFORM_PORT% --timeout 600" requestTimeout="00:10:00" startupTimeLimit="300" startupRetryCount="5" stdoutLogEnabled="true" stdoutLogFile="\\?\%home%\LogFiles\stdout">' >> deployment_package/web.config
-            echo '      <environmentVariables>' >> deployment_package/web.config
-            echo '        <environmentVariable name="PYTHONUNBUFFERED" value="1"/>' >> deployment_package/web.config
-            echo '        <environmentVariable name="PORT" value="%HTTP_PLATFORM_PORT%"/>' >> deployment_package/web.config
-            echo '        <environmentVariable name="PYTHONPATH" value="%home%\site\wwwroot"/>' >> deployment_package/web.config
-            echo '        <environmentVariable name="APPINSIGHTS_INSTRUMENTATION_KEY" value="9af56b4d-4ad5-4643-ba29-41d154893ad4"/>' >> deployment_package/web.config
-            echo '        <environmentVariable name="SIMULATION_MODE" value="false"/>' >> deployment_package/web.config
-            echo '        <environmentVariable name="WEBSITE_HOSTNAME" value="'${{ env.AZURE_WEBAPP_DOMAIN }}'"/>' >> deployment_package/web.config
-            echo '      </environmentVariables>' >> deployment_package/web.config
-            echo '    </httpPlatform>' >> deployment_package/web.config
-            echo '  </system.webServer>' >> deployment_package/web.config
-            echo '</configuration>' >> deployment_package/web.config
-            echo "Created new web.config with simulation mode disabled"
-          fi
+          # Create web.config file
+          echo '<?xml version="1.0" encoding="utf-8"?>' > deployment_package/web.config
+          echo '<configuration>' >> deployment_package/web.config
+          echo '  <system.webServer>' >> deployment_package/web.config
+          echo '    <handlers>' >> deployment_package/web.config
+          echo '      <add name="PythonHandler" path="*" verb="*" modules="httpPlatformHandler" resourceType="Unspecified"/>' >> deployment_package/web.config
+          echo '    </handlers>' >> deployment_package/web.config
+          echo '    <httpPlatform processPath="%home%\python\3.9\python.exe" arguments="-m gunicorn application:app --bind=0.0.0.0:%HTTP_PLATFORM_PORT% --timeout 600" requestTimeout="00:10:00" startupTimeLimit="300" startupRetryCount="5" stdoutLogEnabled="true" stdoutLogFile="\\?\%home%\LogFiles\stdout">' >> deployment_package/web.config
+          echo '      <environmentVariables>' >> deployment_package/web.config
+          echo '        <environmentVariable name="PYTHONUNBUFFERED" value="1"/>' >> deployment_package/web.config
+          echo '        <environmentVariable name="PORT" value="%HTTP_PLATFORM_PORT%"/>' >> deployment_package/web.config
+          echo '        <environmentVariable name="PYTHONPATH" value="%home%\site\wwwroot"/>' >> deployment_package/web.config
+          echo '        <environmentVariable name="APPINSIGHTS_INSTRUMENTATION_KEY" value="9af56b4d-4ad5-4643-ba29-41d154893ad4"/>' >> deployment_package/web.config
+          echo '        <environmentVariable name="SIMULATION_MODE" value="false"/>' >> deployment_package/web.config
+          echo '        <environmentVariable name="WEBSITE_HOSTNAME" value="'${{ env.AZURE_WEBAPP_DOMAIN }}'"/>' >> deployment_package/web.config
+          echo '      </environmentVariables>' >> deployment_package/web.config
+          echo '    </httpPlatform>' >> deployment_package/web.config
+          echo '  </system.webServer>' >> deployment_package/web.config
+          echo '</configuration>' >> deployment_package/web.config
+          echo "Created web.config with simulation mode disabled"
           
           # Make startup script executable
           chmod +x deployment_package/startup.sh
@@ -89,59 +63,12 @@ jobs:
           mkdir -p deployment_package/models/bert
           mkdir -p deployment_package/logs
           
-          # Copy preloaded models
-          if [ -d "preloaded_models/bert" ]; then
-            mkdir -p deployment_package/preloaded_models/bert
-            
-            # Copy best_model_bert
-            if [ -d "preloaded_models/bert/best_model_bert" ]; then
-              echo "Copying best_model_bert..."
-              mkdir -p deployment_package/preloaded_models/bert/best_model_bert
-              cp -r preloaded_models/bert/best_model_bert/* deployment_package/preloaded_models/bert/best_model_bert/
-            fi
-            
-            # Copy tokenizer_bert
-            if [ -d "preloaded_models/bert/tokenizer_bert" ]; then
-              echo "Copying tokenizer_bert..."
-              mkdir -p deployment_package/preloaded_models/bert/tokenizer_bert
-              cp -r preloaded_models/bert/tokenizer_bert/* deployment_package/preloaded_models/bert/tokenizer_bert/
-            fi
-            
-            # Also copy directly to models directory to avoid initialization step
-            if [ -d "preloaded_models/bert/best_model_bert" ]; then
-              echo "Copying best_model_bert to models/bert for immediate use..."
-              mkdir -p deployment_package/models/bert/best_model_bert
-              cp -r preloaded_models/bert/best_model_bert/* deployment_package/models/bert/best_model_bert/
-            fi
-            
-            if [ -d "preloaded_models/bert/tokenizer_bert" ]; then
-              echo "Copying tokenizer_bert to models/bert for immediate use..."
-              mkdir -p deployment_package/models/bert/tokenizer_bert
-              cp -r preloaded_models/bert/tokenizer_bert/* deployment_package/models/bert/tokenizer_bert/
-            fi
-          else
-            echo "No preloaded models found, application will download on first startup"
-          fi
+          # Create config file for BERT
+          echo '{"max_sequence_length": 64, "batch_size": 8, "model_type": "distilbert-base-uncased"}' > deployment_package/models/bert/config.json
           
           # Copy logo if exists
           if [ -f "air-paradis-logo.png" ]; then
             cp air-paradis-logo.png deployment_package/
-            echo "Copied logo file"
-          fi
-          
-          # Create empty config file for BERT
-          echo '{"max_sequence_length": 64, "batch_size": 8, "model_type": "distilbert-base-uncased"}' > deployment_package/models/bert/config.json
-          echo "Created initial config.json for BERT model"
-          
-          # List files in deployment package
-          echo "Listing files in deployment package..."
-          find deployment_package -type f | sort | head -20
-          
-          # Check if model files were copied correctly
-          if [ -d "deployment_package/models/bert/best_model_bert" ] && [ -d "deployment_package/models/bert/tokenizer_bert" ]; then
-            echo "✅ Model files copied successfully to models/bert/"
-          else
-            echo "⚠️ Model files not in models/bert/ - application will try to initialize on startup"
           fi
 
       - name: Login to Azure
@@ -149,7 +76,7 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Deploy to Azure Web App (Production Slot)
+      - name: Deploy to Azure Web App
         id: deploy-to-webapp
         uses: azure/webapps-deploy@v2
         with:
@@ -157,7 +84,49 @@ jobs:
           publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
           package: './deployment_package'
           
-      - name: Verify deployment and display info
+      - name: Upload Models to Azure Web App
+        run: |
+          echo "Preparing to upload models directly to Azure Web App via FTPS..."
+          
+          # Configuration pour FTP
+          APP_NAME="${{ env.AZURE_WEBAPP_NAME }}"
+          RESOURCE_GROUP="${{ env.RESOURCE_GROUP }}"
+          
+          # Get publish profile credentials
+          PUBLISH_PROFILE=$(echo '${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}' | grep -oP '(?<=userName=")[^"]*|(?<=userPWD=")[^"]*' | head -2)
+          FTP_USERNAME=$(echo "$PUBLISH_PROFILE" | head -1)
+          FTP_PASSWORD=$(echo "$PUBLISH_PROFILE" | tail -1)
+          FTP_HOST=$(echo "${{ env.AZURE_WEBAPP_DOMAIN }}" | sed 's/\.azurewebsites\.net/.ftp.azurewebsites.windows.net/')
+          
+          # Créer un script pour transférer les modèles via FTP sécurisé
+          echo "Creating credentials file for FTP..."
+          echo "machine $FTP_HOST login $FTP_USERNAME password $FTP_PASSWORD" > ~/.netrc
+          chmod 600 ~/.netrc
+          
+          echo "Setting up models directory for upload..."
+          if [ -d "models/bert" ]; then
+            echo "Models directory found locally, using these files"
+            mkdir -p upload_models/models/bert
+            cp -r models/bert/* upload_models/models/bert/
+          elif [ -d "preloaded_models/bert" ]; then
+            echo "Using preloaded models directory"
+            mkdir -p upload_models/models/bert
+            cp -r preloaded_models/bert/* upload_models/models/bert/
+          else
+            echo "WARNING: No model files found locally"
+          fi
+          
+          if [ -d "upload_models" ]; then
+            echo "Starting model upload..."
+            # Utiliser CURL pour télécharger le dossier models via FTP
+            cd upload_models
+            find . -type f -exec curl -T {} -u $FTP_USERNAME:$FTP_PASSWORD ftps://$FTP_HOST/site/wwwroot/{} --ssl \;
+            echo "Model upload completed"
+          else
+            echo "No models to upload"
+          fi
+          
+      - name: Post-deployment information
         run: |
           echo "✅ Application deployed to https://${{ env.AZURE_WEBAPP_DOMAIN }}"
           echo "The application may take a few minutes to start as it initializes the BERT model."
