@@ -1,6 +1,3 @@
-# Docs for the Azure Web Apps Deploy action: https://github.com/Azure/webapps-deploy
-# More GitHub Actions for Azure: https://github.com/Azure/actions
-
 name: Build and deploy Python app to Azure Web App - airparadis-sentiment-api
 
 on:
@@ -10,11 +7,11 @@ on:
   workflow_dispatch:
 
 env:
-  # Mise à jour avec l'URL exacte vue dans les logs
   AZURE_WEBAPP_NAME: airparadis-sentiment-api
   AZURE_WEBAPP_DOMAIN: airparadis-sentiment-api-e0c8ane4fmdze5ep.francecentral-01.azurewebsites.net
   PYTHON_VERSION: '3.9'
   APPINSIGHTS_INSTRUMENTATION_KEY: '9af56b4d-4ad5-4643-ba29-41d154893ad4'
+  RESOURCE_GROUP: 'p06-AirParadisResources'  # Ajout du groupe de ressources
 
 jobs:
   build:
@@ -164,14 +161,55 @@ jobs:
           tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_4AF4E359F9C647D1AE5FFEEA925F02A0 }}
           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_14C88AC40F4245B181EA617610E154CD }}
 
-      # Tentative de supprimer tout verrouillage de déploiement
-      - name: Clear deployment locks
+      # Vérifier l'état du site et attendre qu'il soit prêt
+      - name: Check site status and wait for SCM readiness
         run: |
-          echo "Tentative de suppression des verrous de déploiement..."
-          az webapp deployment list-publishing-profiles --name ${{ env.AZURE_WEBAPP_NAME }} --output none || true
-          az webapp deployment source delete --name ${{ env.AZURE_WEBAPP_NAME }} --output none || true
-          echo "Attente de 10 secondes avant le déploiement..."
-          sleep 10
+          echo "Vérification de l'état de l'App Service..."
+          
+          # Vérifier l'état actuel du site
+          SITE_STATUS=$(az webapp show --name ${{ env.AZURE_WEBAPP_NAME }} --resource-group ${{ env.RESOURCE_GROUP }} --query "state" -o tsv)
+          echo "État actuel du site: $SITE_STATUS"
+          
+          # Modifier les paramètres applicatifs pour désactiver les déploiements en cours
+          echo "Configuration des paramètres pour éviter les conflits..."
+          az webapp config appsettings set --name ${{ env.AZURE_WEBAPP_NAME }} --resource-group ${{ env.RESOURCE_GROUP }} --settings WEBSITE_RUN_FROM_PACKAGE=0
+          
+          # Redémarrer le site pour s'assurer que tout est propre
+          echo "Redémarrage de l'App Service..."
+          az webapp restart --name ${{ env.AZURE_WEBAPP_NAME }} --resource-group ${{ env.RESOURCE_GROUP }}
+          
+          # Attendre que le site soit complètement démarré
+          echo "Attente de 30 secondes pour que le site redémarre complètement..."
+          sleep 30
+          
+          # Vérifier que SCM est bien redémarré
+          echo "Vérification de l'état de Kudu SCM..."
+          SCM_URL="https://${{ env.AZURE_WEBAPP_NAME }}-e0c8ane4fmdze5ep.scm.francecentral-01.azurewebsites.net/api/settings"
+          
+          # Attendre que Kudu soit prêt
+          MAX_RETRIES=10
+          RETRY_COUNT=0
+          SCM_READY=false
+          
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ] && [ "$SCM_READY" = "false" ]; do
+            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$SCM_URL" || echo "error")
+            
+            if [ "$HTTP_STATUS" = "200" ]; then
+              SCM_READY=true
+              echo "Kudu SCM est prêt!"
+            else
+              RETRY_COUNT=$((RETRY_COUNT+1))
+              echo "Kudu SCM n'est pas encore prêt (tentative $RETRY_COUNT/$MAX_RETRIES). Attente de 10 secondes..."
+              sleep 10
+            fi
+          done
+          
+          if [ "$SCM_READY" = "true" ]; then
+            echo "L'App Service est prêt pour le déploiement."
+          else
+            echo "⚠️ Attention: Kudu SCM n'a pas répondu après plusieurs tentatives."
+            echo "Le déploiement va être tenté quand même, mais des erreurs peuvent survenir."
+          fi
 
       - name: 'Deploy to Azure Web App'
         uses: azure/webapps-deploy@v3
@@ -179,25 +217,28 @@ jobs:
         with:
           app-name: ${{ env.AZURE_WEBAPP_NAME }}
           slot-name: 'Production'
-          clean: true  # Permet de nettoyer la destination avant le déploiement
       
       - name: Configure App Service Settings
-        if: steps.deploy-to-webapp.outcome == 'success'
+        if: success()
         run: |
           echo "Configuration des paramètres de l'App Service..."
+          
+          # Attendre un peu avant de modifier les paramètres
+          sleep 10
           
           # Définir les paramètres d'application
           az webapp config appsettings set \
             --name ${{ env.AZURE_WEBAPP_NAME }} \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
             --settings \
             DOWNLOAD_MODELS_ON_STARTUP=true \
             WEBSITE_HTTPLOGGING_RETENTION_DAYS=7 \
-            SCM_COMMAND_IDLE_TIMEOUT=600 \
-            WEBSITE_RUN_FROM_PACKAGE=0  # Désactive le mode RunFromPackage qui peut causer des conflits
+            SCM_COMMAND_IDLE_TIMEOUT=600
           
           # Configurer le fichier de démarrage
           az webapp config set \
             --name ${{ env.AZURE_WEBAPP_NAME }} \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
             --startup-file "startup.sh"
           
           echo "Configuration terminée."
