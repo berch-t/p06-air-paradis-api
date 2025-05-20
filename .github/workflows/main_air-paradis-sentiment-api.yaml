@@ -51,7 +51,42 @@ jobs:
           mkdir -p deployment_package
           
           # Copying all core files as-is
-          cp -r api.py app.py app_insights.py application.py init_models.py startup.sh runtime.txt web.config .streamlit requirements.txt deployment_package/
+          cp -r api.py app.py app_insights.py application.py init_models.py startup.sh runtime.txt .streamlit requirements.txt deployment_package/
+          
+          # Check and copy web.config with modifications
+          if [ -f "web.config" ]; then
+            cp web.config deployment_package/
+            # Modify web.config to set SIMULATION_MODE to false
+            sed -i 's/<environmentVariable name="SIMULATION_MODE" value="true"\/>/<environmentVariable name="SIMULATION_MODE" value="false"\/>/' deployment_package/web.config
+            echo "Copied and modified web.config to disable simulation mode"
+          else
+            # Create web.config if it doesn't exist
+            echo '<?xml version="1.0" encoding="utf-8"?>' > deployment_package/web.config
+            echo '<configuration>' >> deployment_package/web.config
+            echo '  <system.webServer>' >> deployment_package/web.config
+            echo '    <handlers>' >> deployment_package/web.config
+            echo '      <add name="PythonHandler" path="*" verb="*" modules="httpPlatformHandler" resourceType="Unspecified"/>' >> deployment_package/web.config
+            echo '    </handlers>' >> deployment_package/web.config
+            echo '    <httpPlatform processPath="%home%\python\3.9\python.exe"' >> deployment_package/web.config
+            echo '                  arguments="-m gunicorn application:app --bind=0.0.0.0:%HTTP_PLATFORM_PORT% --timeout 600"' >> deployment_package/web.config
+            echo '                  requestTimeout="00:10:00"' >> deployment_package/web.config
+            echo '                  startupTimeLimit="300"' >> deployment_package/web.config
+            echo '                  startupRetryCount="5"' >> deployment_package/web.config
+            echo '                  stdoutLogEnabled="true"' >> deployment_package/web.config
+            echo '                  stdoutLogFile="\\?\%home%\LogFiles\stdout">' >> deployment_package/web.config
+            echo '      <environmentVariables>' >> deployment_package/web.config
+            echo '        <environmentVariable name="PYTHONUNBUFFERED" value="1"/>' >> deployment_package/web.config
+            echo '        <environmentVariable name="PORT" value="%HTTP_PLATFORM_PORT%"/>' >> deployment_package/web.config
+            echo '        <environmentVariable name="PYTHONPATH" value="%home%\site\wwwroot"/>' >> deployment_package/web.config
+            echo '        <environmentVariable name="APPINSIGHTS_INSTRUMENTATION_KEY" value="'${{ env.APPINSIGHTS_INSTRUMENTATION_KEY }}'"/>' >> deployment_package/web.config
+            echo '        <environmentVariable name="SIMULATION_MODE" value="false"/>' >> deployment_package/web.config
+            echo '        <environmentVariable name="WEBSITE_HOSTNAME" value="'${{ env.AZURE_WEBAPP_DOMAIN }}'"/>' >> deployment_package/web.config
+            echo '      </environmentVariables>' >> deployment_package/web.config
+            echo '    </httpPlatform>' >> deployment_package/web.config
+            echo '  </system.webServer>' >> deployment_package/web.config
+            echo '</configuration>' >> deployment_package/web.config
+            echo "Created new web.config with simulation mode disabled"
+          fi
           
           # Make startup script executable
           chmod +x deployment_package/startup.sh
@@ -103,10 +138,6 @@ jobs:
           # Create empty config file for BERT
           echo '{"max_sequence_length": 64, "batch_size": 8, "model_type": "distilbert-base-uncased"}' > deployment_package/models/bert/config.json
           echo "Created initial config.json for BERT model"
-          
-          # Modify web.config to set SIMULATION_MODE to false
-          sed -i 's/<environmentVariable name="SIMULATION_MODE" value="true"\/>/<environmentVariable name="SIMULATION_MODE" value="false"\/>/' deployment_package/web.config
-          echo "Modified web.config to disable simulation mode"
           
           # List files in deployment package
           echo "Listing files in deployment package..."
