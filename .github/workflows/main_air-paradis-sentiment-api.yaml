@@ -16,11 +16,13 @@ permissions:
   contents: read
 
 jobs:
-  build-and-test:
+  build-and-deploy:
     runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v3
+        with:
+          lfs: true
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -44,13 +46,29 @@ jobs:
           mkdir -p deployment_package
           
           # Copy the required files to the deployment package
-          cp -r api.py app.py application.py init_models.py startup.sh requirements.txt runtime.txt .streamlit models deployment_package/
+          cp -r api.py app.py application.py init_models.py startup.sh requirements.txt runtime.txt .streamlit tests deployment_package/
           
-          # Copy the logo
-          cp -r air-paradis-logo.png deployment_package/
+          # Create necessary directories and copy models if they exist
+          mkdir -p deployment_package/models
+          if [ -d "models/bert" ]; then
+            cp -r models/bert deployment_package/models/
+            echo "Modèle BERT existant copié dans le package de déploiement"
+          else
+            mkdir -p deployment_package/models/bert
+            echo "Répertoire models/bert créé (vide)"
+          fi
           
-          # Create logs directory in the deployment package
+          # Copy preloaded models if they exist
+          if [ -d "preloaded_models" ]; then
+            cp -r preloaded_models deployment_package/
+            echo "Modèles préchargés copiés dans le package de déploiement"
+          fi
+          
+          # Create logs directory
           mkdir -p deployment_package/logs
+          
+          # Copy the logo if it exists
+          cp -r air-paradis-logo.png deployment_package/ || echo "Logo file not found, continuing..."
           
           # Create a web.config file for Azure App Service
           echo '<?xml version="1.0" encoding="utf-8"?>
@@ -59,7 +77,7 @@ jobs:
               <handlers>
                 <add name="PythonHandler" path="*" verb="*" modules="httpPlatformHandler" resourceType="Unspecified"/>
               </handlers>
-              <httpPlatform processPath="bash" arguments="startup.sh" requestTimeout="00:04:00" startupTimeLimit="60" startupRetryCount="3" stdoutLogEnabled="true" stdoutLogFile="logs\api.log">
+              <httpPlatform processPath="bash" arguments="startup.sh" requestTimeout="00:04:00" startupTimeLimit="120" startupRetryCount="3" stdoutLogEnabled="true" stdoutLogFile="logs\api.log">
                 <environmentVariables>
                   <environmentVariable name="PYTHONUNBUFFERED" value="1"/>
                   <environmentVariable name="APPINSIGHTS_INSTRUMENTATION_KEY" value="${{ env.APPINSIGHTS_INSTRUMENTATION_KEY }}"/>
@@ -67,17 +85,6 @@ jobs:
               </httpPlatform>
             </system.webServer>
           </configuration>' > deployment_package/web.config
-
-  deploy:
-    needs: build-and-test
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Download deployment package
-        uses: actions/download-artifact@v2
-        with:
-          name: deployment-package
-          path: ./deployment_package
 
       - name: 'Login to Azure'
         uses: azure/login@v1
