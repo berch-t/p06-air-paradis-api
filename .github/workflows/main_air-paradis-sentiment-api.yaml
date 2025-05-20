@@ -6,15 +6,11 @@ on:
   workflow_dispatch:
 
 env:
-  AZURE_WEBAPP_NAME: air-paradis-sentiment-api
-  AZURE_WEBAPP_DOMAIN: air-paradis-sentiment-api-dkceasgya2cvaehc.francecentral-01.azurewebsites.net
+  AZURE_WEBAPP_NAME: airparadis-sentiment-api 
+  AZURE_WEBAPP_DOMAIN: airparadis-sentiment-api-e0c8ane4fmdze5ep.francecentral-01.azurewebsites.net 
   PYTHON_VERSION: '3.9'
-  APPINSIGHTS_INSTRUMENTATION_KEY: '9af56b4d-4ad5-4643-ba29-41d154893ad4'
-  RESOURCE_GROUP: 'p06-AirParadisResources'
-  APP_INSIGHTS_NAME: 'air-paradis-sentiment-monitoring'
-  # Informations FTPS exactes
-  FTPS_ENDPOINT: ftps://waws-prod-par-013.ftp.azurewebsites.windows.net/site/wwwroot
-  FTPS_USERNAME: air-paradis-sentiment-api\$air-paradis-sentiment-api
+  APPINSIGHTS_INSTRUMENTATION_KEY: '1d67b737-2f84-4321-acd7-aede137cdb14' 
+  RESOURCE_GROUP: 'p06-airparadisresources' 
 
 permissions:
   contents: read
@@ -24,10 +20,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository (without LFS)
+      - name: Checkout repository
         uses: actions/checkout@v3
         with:
-          lfs: false  # Éviter l'erreur de limite LFS
+          lfs: false # Désactiver LFS
           fetch-depth: 0
       
       - name: Create deployment package
@@ -35,97 +31,129 @@ jobs:
           echo "Creating deployment package..."
           mkdir -p deployment_package
           
-          # Copying all core files except models
-          cp -r api.py app.py app_insights.py application.py init_models.py startup.sh runtime.txt .streamlit requirements.txt deployment_package/
+          # Copier tous les fichiers nécessaires
+          cp -r api.py app.py app_insights.py application.py init_models.py startup.sh runtime.txt requirements.txt deployment_package/
+          [ -d ".streamlit" ] && cp -r .streamlit deployment_package/
+          [ -f "air-paradis-logo.png" ] && cp air-paradis-logo.png deployment_package/
           
-          # Create web.config file
+          # Créer les dossiers nécessaires
+          mkdir -p deployment_package/models/bert
+          mkdir -p deployment_package/logs
+          
+          # Créer le fichier de configuration pour le modèle BERT
+          echo '{"max_sequence_length": 64, "batch_size": 8, "model_type": "distilbert-base-uncased"}' > deployment_package/models/bert/config.json
+          
+          # Créer le fichier web.config
           echo '<?xml version="1.0" encoding="utf-8"?>' > deployment_package/web.config
           echo '<configuration>' >> deployment_package/web.config
           echo '  <system.webServer>' >> deployment_package/web.config
           echo '    <handlers>' >> deployment_package/web.config
           echo '      <add name="PythonHandler" path="*" verb="*" modules="httpPlatformHandler" resourceType="Unspecified"/>' >> deployment_package/web.config
           echo '    </handlers>' >> deployment_package/web.config
-          echo '    <httpPlatform processPath="%home%\python\3.9\python.exe" arguments="-m gunicorn application:app --bind=0.0.0.0:%HTTP_PLATFORM_PORT% --timeout 600" requestTimeout="00:10:00" startupTimeLimit="300" startupRetryCount="5" stdoutLogEnabled="true" stdoutLogFile="\\?\%home%\LogFiles\stdout">' >> deployment_package/web.config
+          echo '    <httpPlatform processPath="%home%\python\3.9\python.exe" arguments="-m gunicorn application:app --bind=0.0.0.0:%HTTP_PLATFORM_PORT% --timeout 600" requestTimeout="00:10:00" startupTimeLimit="600" startupRetryCount="5" stdoutLogEnabled="true" stdoutLogFile="\\?\%home%\LogFiles\stdout">' >> deployment_package/web.config
           echo '      <environmentVariables>' >> deployment_package/web.config
           echo '        <environmentVariable name="PYTHONUNBUFFERED" value="1"/>' >> deployment_package/web.config
           echo '        <environmentVariable name="PORT" value="%HTTP_PLATFORM_PORT%"/>' >> deployment_package/web.config
           echo '        <environmentVariable name="PYTHONPATH" value="%home%\site\wwwroot"/>' >> deployment_package/web.config
-          echo '        <environmentVariable name="APPINSIGHTS_INSTRUMENTATION_KEY" value="9af56b4d-4ad5-4643-ba29-41d154893ad4"/>' >> deployment_package/web.config
+          echo '        <environmentVariable name="APPINSIGHTS_INSTRUMENTATION_KEY" value="${{ env.APPINSIGHTS_INSTRUMENTATION_KEY }}"/>' >> deployment_package/web.config
           echo '        <environmentVariable name="SIMULATION_MODE" value="false"/>' >> deployment_package/web.config
-          echo '        <environmentVariable name="WEBSITE_HOSTNAME" value="'${{ env.AZURE_WEBAPP_DOMAIN }}'"/>' >> deployment_package/web.config
+          echo '        <environmentVariable name="DOWNLOAD_MODELS_ON_STARTUP" value="true"/>' >> deployment_package/web.config
           echo '      </environmentVariables>' >> deployment_package/web.config
           echo '    </httpPlatform>' >> deployment_package/web.config
           echo '  </system.webServer>' >> deployment_package/web.config
           echo '</configuration>' >> deployment_package/web.config
-          echo "Created web.config with simulation mode disabled"
           
-          # Make startup script executable
+          # Modifier le script startup.sh pour télécharger les modèles au démarrage
+          echo '#!/bin/bash' > deployment_package/startup.sh
+          echo 'set -e' >> deployment_package/startup.sh
+          echo '' >> deployment_package/startup.sh
+          echo '# Variables d'"'"'environnement' >> deployment_package/startup.sh
+          echo 'export PYTHONUNBUFFERED=1' >> deployment_package/startup.sh
+          echo 'export PORT=${PORT:-8000}' >> deployment_package/startup.sh
+          echo 'export PYTHONPATH=$(pwd)' >> deployment_package/startup.sh
+          echo 'export APPINSIGHTS_INSTRUMENTATION_KEY=${APPINSIGHTS_INSTRUMENTATION_KEY}' >> deployment_package/startup.sh
+          echo 'export DOWNLOAD_MODELS_ON_STARTUP=${DOWNLOAD_MODELS_ON_STARTUP:-true}' >> deployment_package/startup.sh
+          echo '' >> deployment_package/startup.sh
+          echo '# Création des répertoires nécessaires' >> deployment_package/startup.sh
+          echo 'mkdir -p logs' >> deployment_package/startup.sh
+          echo 'mkdir -p models/bert' >> deployment_package/startup.sh
+          echo '' >> deployment_package/startup.sh
+          echo '# Journalisation du démarrage' >> deployment_package/startup.sh
+          echo 'echo "== Démarrage de l'"'"'application ==" > logs/startup.log' >> deployment_package/startup.sh
+          echo 'echo "Python: $(python --version)" >> logs/startup.log' >> deployment_package/startup.sh
+          echo 'echo "Répertoire de travail: $(pwd)" >> logs/startup.log' >> deployment_package/startup.sh
+          echo 'echo "Date et heure: $(date)" >> logs/startup.log' >> deployment_package/startup.sh
+          echo '' >> deployment_package/startup.sh
+          echo '# Installation des dépendances si nécessaire' >> deployment_package/startup.sh
+          echo 'if [ ! -f ".dependencies_installed" ]; then' >> deployment_package/startup.sh
+          echo '    echo "Installation des packages requis..." >> logs/startup.log' >> deployment_package/startup.sh
+          echo '    python -m pip install -r requirements.txt || true' >> deployment_package/startup.sh
+          echo '    touch .dependencies_installed' >> deployment_package/startup.sh
+          echo 'fi' >> deployment_package/startup.sh
+          echo '' >> deployment_package/startup.sh
+          echo '# Téléchargement des modèles si activé' >> deployment_package/startup.sh
+          echo 'if [ "$DOWNLOAD_MODELS_ON_STARTUP" = "true" ]; then' >> deployment_package/startup.sh
+          echo '    echo "Téléchargement des modèles activé" >> logs/startup.log' >> deployment_package/startup.sh
+          echo '    python init_models.py >> logs/startup.log 2>&1 || true' >> deployment_package/startup.sh
+          echo '    echo "Initialisation du modèle terminée" >> logs/startup.log' >> deployment_package/startup.sh
+          echo 'else' >> deployment_package/startup.sh
+          echo '    echo "Téléchargement des modèles désactivé" >> logs/startup.log' >> deployment_package/startup.sh
+          echo 'fi' >> deployment_package/startup.sh
+          echo '' >> deployment_package/startup.sh
+          echo '# Vérification de la présence des modèles' >> deployment_package/startup.sh
+          echo 'if [ -d "models/bert/best_model_bert" ] && [ -d "models/bert/tokenizer_bert" ]; then' >> deployment_package/startup.sh
+          echo '    echo "Modèles BERT correctement initialisés" >> logs/startup.log' >> deployment_package/startup.sh
+          echo '    export SIMULATION_MODE=false' >> deployment_package/startup.sh
+          echo 'else' >> deployment_package/startup.sh
+          echo '    echo "Modèles BERT non trouvés, démarrage en mode simulation" >> logs/startup.log' >> deployment_package/startup.sh
+          echo '    export SIMULATION_MODE=true' >> deployment_package/startup.sh
+          echo 'fi' >> deployment_package/startup.sh
+          echo '' >> deployment_package/startup.sh
+          echo '# Démarrage de l'"'"'application' >> deployment_package/startup.sh
+          echo 'echo "== Démarrage du serveur API ==" >> logs/startup.log' >> deployment_package/startup.sh
+          echo 'exec gunicorn --bind=0.0.0.0:$PORT --timeout 600 --access-logfile logs/access.log --error-logfile logs/error.log application:app' >> deployment_package/startup.sh
+          
+          # Rendre le script exécutable
           chmod +x deployment_package/startup.sh
-          
-          # Create directories structure that the app expects
-          mkdir -p deployment_package/models/bert/best_model_bert
-          mkdir -p deployment_package/models/bert/tokenizer_bert
-          mkdir -p deployment_package/logs
-          
-          # Create config file for BERT
-          echo '{"max_sequence_length": 64, "batch_size": 8, "model_type": "distilbert-base-uncased"}' > deployment_package/models/bert/config.json
-          
-          # Copy logo if exists
-          if [ -f "air-paradis-logo.png" ]; then
-            cp air-paradis-logo.png deployment_package/
-          fi
 
       - name: Login to Azure
         uses: azure/login@v1
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Deploy code to Azure Web App
+      - name: Deploy to Azure Web App
         id: deploy-to-webapp
         uses: azure/webapps-deploy@v2
         with:
           app-name: ${{ env.AZURE_WEBAPP_NAME }}
           publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
           package: './deployment_package'
-          
-      - name: Install LFTP
+      
+      - name: Configure App Service Settings
         run: |
-          sudo apt-get update
-          sudo apt-get install -y lftp
+          echo "Configuration des paramètres de l'App Service..."
           
-      - name: Upload Models to Azure Via LFTP
-        run: |
-          echo "Preparing models for upload to Azure Web App..."
+          # Définir les paramètres d'application
+          az webapp config appsettings set \
+            --name ${{ env.AZURE_WEBAPP_NAME }} \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --settings \
+            DOWNLOAD_MODELS_ON_STARTUP=true \
+            WEBSITE_HTTPLOGGING_RETENTION_DAYS=7 \
+            SCM_COMMAND_IDLE_TIMEOUT=600
           
-          # Création d'un dossier pour organiser les modèles à uploader
-          mkdir -p upload/models/bert
+          # Configurer le délai de démarrage
+          az webapp config set \
+            --name ${{ env.AZURE_WEBAPP_NAME }} \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --startup-file "startup.sh" \
+            --generic-configurations '{"maxPendingConnections": 1000}'
           
-          # Préparation des modèles locaux
-          if [ -d "preloaded_models/bert/best_model_bert" ]; then
-            echo "Copying best_model_bert files for upload..."
-            mkdir -p upload/models/bert/best_model_bert
-            cp -r preloaded_models/bert/best_model_bert/* upload/models/bert/best_model_bert/
-          fi
-          
-          if [ -d "preloaded_models/bert/tokenizer_bert" ]; then
-            echo "Copying tokenizer_bert files for upload..."
-            mkdir -p upload/models/bert/tokenizer_bert
-            cp -r preloaded_models/bert/tokenizer_bert/* upload/models/bert/tokenizer_bert/
-          fi
-          
-          # Utilisation de LFTP pour télécharger avec les informations FTPS correctes
-          echo "Starting FTPS upload to Azure using LFTP..."
-          lftp -c "set ssl:verify-certificate no; \
-                  open ${{ env.FTPS_ENDPOINT }}; \
-                  user ${{ secrets.AZURE_PUBLISH_USERNAME }} ${{ secrets.AZURE_PUBLISH_PASSWORD }}; \
-                  mirror -R upload/ .; \
-                  bye"
-          
-          echo "FTPS upload completed"
+          echo "Configuration terminée."
           
       - name: Post-deployment information
         run: |
-          echo "✅ Application deployed to https://${{ env.AZURE_WEBAPP_DOMAIN }}"
-          echo "The application may take a few minutes to start as it initializes the BERT model."
-          echo "To check the application status, visit https://${{ env.AZURE_WEBAPP_DOMAIN }}/health"
-          echo "For more details, visit the Azure portal > App Service > ${{ env.AZURE_WEBAPP_NAME }} > Monitoring > Log stream"
+          echo "✅ Application déployée sur https://${{ env.AZURE_WEBAPP_DOMAIN }}"
+          echo "L'application va automatiquement télécharger les modèles BERT au démarrage."
+          echo "Ce processus peut prendre jusqu'à 10 minutes."
+          echo "Pour vérifier l'état de l'application, visitez https://${{ env.AZURE_WEBAPP_DOMAIN }}/health"
