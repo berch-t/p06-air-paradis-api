@@ -91,6 +91,19 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
           
+      - name: Create Action Group for Alerts
+        run: |
+          # Create action group
+          echo "Creating Action Group for alerts..."
+          ACTION_GROUP_ID=$(az monitor action-group create \
+            --name "ModelErrorAlerts" \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --action email berch-t@gmail.com \
+            --short-name "ModelErr" \
+            --query id -o tsv)
+          echo "Action Group created with ID: $ACTION_GROUP_ID"
+        continue-on-error: true
+
       - name: Set up App Insights alert rule
         run: |
           # Set up alert rule for consecutive errors
@@ -99,12 +112,11 @@ jobs:
             --name "ConsecutiveModelErrors" \
             --resource-group ${{ env.RESOURCE_GROUP }} \
             --scopes ${{ secrets.APPINSIGHTS_RESOURCE_ID }} \
-            --condition "count IncorrectPrediction > 3 where timeGrain = PT5M" \
-            --description "Alert when the model makes 3 or more consecutive incorrect predictions in 5 minutes" \
+            --condition "count IncorrectPrediction > 3" \
+            --description "Alert when the model makes more than 3 incorrect predictions" \
             --evaluation-frequency 5m \
             --window-size 5m \
-            --severity 2 \
-            --action $(az monitor action-group create -g ${{ env.RESOURCE_GROUP }} -n "ModelErrorAlerts" --action email berch-t@gmail.com --action-name "EmailToModelTeam" --query id -o tsv)
+            --severity 2
         continue-on-error: true
 
       - name: 'Deploy to Azure Web App'
