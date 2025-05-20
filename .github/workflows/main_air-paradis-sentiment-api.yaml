@@ -48,6 +48,9 @@ jobs:
           # Copy the required files to the deployment package
           cp -r api.py app.py application.py init_models.py startup.sh requirements.txt runtime.txt .streamlit tests deployment_package/
           
+          # Copy app_insights.py if it exists
+          cp app_insights.py deployment_package/ || echo "Fichier app_insights.py non trouvé, assurez-vous qu'il est présent dans le dépôt."
+          
           # Create necessary directories and copy models if they exist
           mkdir -p deployment_package/models
           if [ -d "models/bert" ]; then
@@ -71,20 +74,31 @@ jobs:
           cp -r air-paradis-logo.png deployment_package/ || echo "Logo file not found, continuing..."
           
           # Create a web.config file for Azure App Service
-          echo '<?xml version="1.0" encoding="utf-8"?>
+          cat > deployment_package/web.config << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
           <configuration>
             <system.webServer>
               <handlers>
                 <add name="PythonHandler" path="*" verb="*" modules="httpPlatformHandler" resourceType="Unspecified"/>
               </handlers>
-              <httpPlatform processPath="bash" arguments="startup.sh" requestTimeout="00:04:00" startupTimeLimit="120" startupRetryCount="3" stdoutLogEnabled="true" stdoutLogFile="logs\api.log">
+              <httpPlatform processPath="%home%\python\3.9\python.exe" 
+                            arguments="-m gunicorn application:app --bind=0.0.0.0:%HTTP_PLATFORM_PORT% --timeout 600" 
+                            requestTimeout="00:10:00" 
+                            startupTimeLimit="300" 
+                            startupRetryCount="5" 
+                            stdoutLogEnabled="true" 
+                            stdoutLogFile="\\?\%home%\LogFiles\stdout">
                 <environmentVariables>
                   <environmentVariable name="PYTHONUNBUFFERED" value="1"/>
+                  <environmentVariable name="PORT" value="%HTTP_PLATFORM_PORT%"/>
+                  <environmentVariable name="PYTHONPATH" value="%home%\site\wwwroot"/>
                   <environmentVariable name="APPINSIGHTS_INSTRUMENTATION_KEY" value="${{ env.APPINSIGHTS_INSTRUMENTATION_KEY }}"/>
+                  <environmentVariable name="SIMULATION_MODE" value="true"/>
                 </environmentVariables>
               </httpPlatform>
             </system.webServer>
-          </configuration>' > deployment_package/web.config
+          </configuration>
+          EOF
 
       - name: 'Login to Azure'
         uses: azure/login@v1
