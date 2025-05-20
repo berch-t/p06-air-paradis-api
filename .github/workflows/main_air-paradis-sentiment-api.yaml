@@ -1,0 +1,108 @@
+name: Build and deploy Sentiment Analysis App to Azure
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+env:
+  AZURE_WEBAPP_NAME: air-paradis-sentiment-api
+  PYTHON_VERSION: '3.9'
+  APPINSIGHTS_INSTRUMENTATION_KEY: '9af56b4d-4ad5-4643-ba29-41d154893ad4'
+  RESOURCE_GROUP: 'p06-AirParadisResources'
+  APP_INSIGHTS_NAME: 'air-paradis-sentiment-monitoring'
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Run unit tests
+        run: |
+          python -m pytest tests/
+
+      - name: Create deployment package
+        run: |
+          # Create a directory for the deployment package
+          mkdir -p deployment_package
+          
+          # Copy the required files to the deployment package
+          cp -r api.py app.py application.py init_models.py startup.sh requirements.txt runtime.txt .streamlit models deployment_package/
+          
+          # Copy the logo
+          cp -r air-paradis-logo.png deployment_package/
+          
+          # Create logs directory in the deployment package
+          mkdir -p deployment_package/logs
+          
+          # Create a web.config file for Azure App Service
+          echo '<?xml version="1.0" encoding="utf-8"?>
+          <configuration>
+            <system.webServer>
+              <handlers>
+                <add name="PythonHandler" path="*" verb="*" modules="httpPlatformHandler" resourceType="Unspecified"/>
+              </handlers>
+              <httpPlatform processPath="bash" arguments="startup.sh" requestTimeout="00:04:00" startupTimeLimit="60" startupRetryCount="3" stdoutLogEnabled="true" stdoutLogFile="logs\api.log">
+                <environmentVariables>
+                  <environmentVariable name="PYTHONUNBUFFERED" value="1"/>
+                  <environmentVariable name="APPINSIGHTS_INSTRUMENTATION_KEY" value="${{ env.APPINSIGHTS_INSTRUMENTATION_KEY }}"/>
+                </environmentVariables>
+              </httpPlatform>
+            </system.webServer>
+          </configuration>' > deployment_package/web.config
+
+  deploy:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download deployment package
+        uses: actions/download-artifact@v2
+        with:
+          name: deployment-package
+          path: ./deployment_package
+
+      - name: 'Login to Azure'
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+          
+      - name: Set up App Insights alert rule
+        run: |
+          # Set up alert rule for consecutive errors
+          echo "Setting up Application Insights alert rule for model errors..."
+          az monitor metrics alert create \
+            --name "ConsecutiveModelErrors" \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --scopes ${{ secrets.APPINSIGHTS_RESOURCE_ID }} \
+            --condition "count IncorrectPrediction > 3 where timeGrain = PT5M" \
+            --description "Alert when the model makes 3 or more consecutive incorrect predictions in 5 minutes" \
+            --evaluation-frequency 5m \
+            --window-size 5m \
+            --severity 2 \
+            --action $(az monitor action-group create -g ${{ env.RESOURCE_GROUP }} -n "ModelErrorAlerts" --action email berch-t@gmail.com --action-name "EmailToModelTeam" --query id -o tsv)
+        continue-on-error: true
+
+      - name: 'Deploy to Azure Web App'
+        uses: azure/webapps-deploy@v2
+        with:
+          app-name: ${{ env.AZURE_WEBAPP_NAME }}
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          package: './deployment_package'

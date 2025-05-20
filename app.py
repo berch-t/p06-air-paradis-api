@@ -2,9 +2,7 @@ import streamlit as st
 import requests
 import pandas as pd
 import matplotlib.pyplot as plt
-import seaborn as sns
 import plotly.express as px
-import plotly.graph_objects as go
 import json
 import time
 import os
@@ -170,7 +168,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Entête
-st.markdown('<h1 class="main-header">✈️ Air Paradis - Analyse de Sentiment</h1>', unsafe_allow_html=True)
+st.markdown('<h1 class="main-header">✈️ Air Paradis - Analyse de Sentiment avec BERT</h1>', unsafe_allow_html=True)
 
 # Vérification de l'état de l'API
 api_status = check_api_health()
@@ -185,7 +183,7 @@ st.sidebar.image("air-paradis-logo.png", width=150)
 st.sidebar.markdown("## À propos")
 st.sidebar.info(
     "Cette application permet d'analyser le sentiment des tweets concernant la compagnie aérienne Air Paradis. "
-    "Elle utilise un modèle d'intelligence artificielle pour déterminer si un tweet exprime un sentiment positif ou négatif."
+    "Elle utilise un modèle BERT d'intelligence artificielle pour déterminer si un tweet exprime un sentiment positif ou négatif."
 )
 
 st.sidebar.markdown("## Comment ça marche")
@@ -225,7 +223,7 @@ tweet_input = st.text_area("Entrez un tweet à analyser", height=100)
 # Analyse du sentiment
 if st.button("Analyser le sentiment", key="btn_analyze"):
     if tweet_input:
-        with st.spinner("Analyse en cours..."):
+        with st.spinner("Analyse en cours avec le modèle BERT..."):
             # Appel à l'API pour la prédiction
             result = predict_sentiment(tweet_input)
             
@@ -250,6 +248,7 @@ if st.button("Analyser le sentiment", key="btn_analyze"):
                 st.markdown(f"**Tweet prétraité :** {result.get('processed_tweet', '')}", unsafe_allow_html=True)
                 st.markdown(f"**Sentiment détecté :** <span class='{sentiment_class}'>{sentiment}</span>", unsafe_allow_html=True)
                 st.markdown(f"**Niveau de confiance :** <span class='{confidence_class}'>{confidence:.1f}%</span>", unsafe_allow_html=True)
+                st.markdown(f"**Modèle utilisé :** BERT", unsafe_allow_html=True)
                 st.markdown('</div>', unsafe_allow_html=True)
                 
                 # Demande de feedback
@@ -263,7 +262,7 @@ if st.button("Analyser le sentiment", key="btn_analyze"):
                             st.success("Merci pour votre feedback !")
                             # Sauvegarde de la prédiction et du feedback dans l'historique
                             result['feedback'] = True
-                            result['timestamp'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            result['timestamp'] = datetime.now()
                             st.session_state.predictions_history.append(result)
                             # Sauvegarde des prédictions dans un fichier
                             save_predictions_history()
@@ -277,7 +276,7 @@ if st.button("Analyser le sentiment", key="btn_analyze"):
                             st.warning("Merci pour votre feedback ! Nous utiliserons cette information pour améliorer notre modèle.")
                             # Sauvegarde de la prédiction et du feedback dans l'historique
                             result['feedback'] = False
-                            result['timestamp'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            result['timestamp'] = datetime.now()
                             st.session_state.predictions_history.append(result)
                             # Sauvegarde des prédictions dans un fichier
                             save_predictions_history()
@@ -336,12 +335,12 @@ if st.session_state.predictions_history:
             feedback_counts, 
             values='Count', 
             names='Correct', 
-            title='Précision du modèle (selon le feedback)',
+            title='Précision du modèle BERT (selon le feedback)',
             color='Correct',
             color_discrete_map={True: 'green', False: 'red'}
         )
         st.plotly_chart(fig, use_container_width=True)
 
 # Pied de page
-st.markdown('<div class="footer">© 2025 Air Paradis - Analyse de Sentiment | Développé par MIC (Marketing Intelligence Consulting)</div>', 
+st.markdown('<div class="footer">© 2025 Air Paradis - Analyse de Sentiment avec BERT | Développé par MIC (Marketing Intelligence Consulting)</div>', 
             unsafe_allow_html=True)

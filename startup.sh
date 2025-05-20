@@ -1,53 +1,47 @@
 #!/bin/bash
 
-# Set environment variables
-export APPINSIGHTS_INSTRUMENTATION_KEY=9af56b4d-4ad5-4643-ba29-XXXXXXXXXXXX
-export API_URL=http://localhost:5000
-export API_URL_PROD=air-paradis-sentiment-api-dkceasgya2cvaehc.francecentral-01.azurewebsites.net
-export MODEL_PATH=models
-export PORT=8000
-export PYTHONPATH=/home/site/wwwroot
+# Définir des variables d'environnement
+export PYTHONUNBUFFERED=1
+export PORT=${PORT:-8000}
+export APPINSIGHTS_INSTRUMENTATION_KEY="9af56b4d-4ad5-4643-ba29-41d154893ad4"
 
-# Display directory contents for debugging
-echo "Current directory: $(pwd)"
-echo "Directory contents:"
-ls -la
-
-# Create log directory if it doesn't exist
+# Créer les répertoires nécessaires
 mkdir -p logs
+mkdir -p models/bert
 
-# Ensure dependencies are installed
-echo "Installing required packages..."
-pip install -r requirements.txt
-pip install gunicorn streamlit
+# Afficher les informations sur l'environnement
+echo "Environnement Python:"
+which python
+python --version
+echo "Emplacement de pip:"
+which pip
 
-# Start the API directly with Python instead of gunicorn
-echo "Starting API server..."
-python application.py > logs/api.log 2>&1 &
+# Installer les dépendances avec le chemin complet de pip
+echo "Installation des dépendances requises..."
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+
+# Initialiser le modèle BERT
+echo "Initialisation du modèle BERT..."
+python init_models.py
+
+# Démarrer le serveur API
+echo "Démarrage du serveur API..."
+gunicorn --bind=0.0.0.0:$PORT --timeout 600 --workers 2 application:app > logs/api.log 2>&1 &
 API_PID=$!
-echo "API server started with PID: $API_PID"
+echo "Serveur API démarré avec PID: $API_PID"
 
-# Wait for API to initialize
-echo "Waiting for API to initialize..."
-sleep 20
+# Attendre que l'API soit prête
+echo "Attente de l'initialisation de l'API..."
+sleep 10
 
-# Check if API process is still running
-if ps -p $API_PID > /dev/null; then
-    echo "API server is running correctly"
-else
-    echo "Warning: API server process exited. Checking logs:"
+# Vérifier si l'API est active
+if ! ps -p $API_PID > /dev/null; then
+    echo "Avertissement: Le processus du serveur API s'est arrêté. Vérification des logs:"
     cat logs/api.log
-    # Try to start again with more debug info
-    echo "Trying to start API again with more debug..."
-    FLASK_DEBUG=1 FLASK_ENV=development python application.py > logs/api_debug.log 2>&1 &
-    API_PID=$!
-    sleep 10
+    echo "Tentative de redémarrage de l'API avec plus de debug..."
+    gunicorn --bind=0.0.0.0:$PORT --timeout 600 --workers 1 --log-level debug application:app
 fi
 
-# Verify streamlit is available
-which streamlit || echo "Streamlit not found in PATH"
-pip list | grep streamlit
-
-# Start the Streamlit app
-echo "Starting Streamlit app..."
-python -m streamlit run app.py --server.port=8501 --server.address=0.0.0.0
+# Garder le processus actif
+tail -f logs/api.log

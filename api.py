@@ -3,8 +3,7 @@ import pickle
 import numpy as np
 import tensorflow as tf
 from flask import Flask, request, jsonify
-from tensorflow.keras.models import load_model
-from tensorflow.keras.preprocessing.sequence import pad_sequences
+from transformers import DistilBertTokenizer, TFDistilBertForSequenceClassification
 import re
 import traceback
 import logging
@@ -23,7 +22,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Configuration pour Azure Application Insights
-APPINSIGHTS_INSTRUMENTATION_KEY = os.getenv('APPINSIGHTS_INSTRUMENTATION_KEY', '')
+APPINSIGHTS_INSTRUMENTATION_KEY = os.getenv('APPINSIGHTS_INSTRUMENTATION_KEY', '9af56b4d-4ad5-4643-ba29-41d154893ad4')
 APPINSIGHTS_ENDPOINT = "https://dc.services.visualstudio.com/v2/track"
 
 app = Flask(__name__)
@@ -53,32 +52,31 @@ def preprocess_tweet(tweet):
     
     return tweet
 
-# Fonction pour charger le modèle et le tokenizer
-def load_sentiment_model():
+# Fonction pour charger le modèle DistilBERT et le tokenizer
+def load_bert_model():
     """
-    Charge le modèle et le tokenizer pour l'analyse de sentiment
+    Charge le modèle DistilBERT et le tokenizer pour l'analyse de sentiment
     """
     try:
+        # Définition des chemins
+        model_path = os.path.join('models', 'bert', 'best_model_bert')
+        tokenizer_path = os.path.join('models', 'bert', 'tokenizer_bert')
+        
         # Chargement du modèle
-        model_path = os.path.join('models', 'best_advanced_model_BiLSTM_Word2Vec.h5')
-        model = load_model(model_path)
-        logger.info(f"Modèle chargé depuis {model_path}")
+        model = TFDistilBertForSequenceClassification.from_pretrained(model_path)
+        logger.info(f"Modèle BERT chargé depuis {model_path}")
         
         # Chargement du tokenizer
-        tokenizer_path = os.path.join('models', 'tokenizer.pickle')
-        with open(tokenizer_path, 'rb') as handle:
-            tokenizer = pickle.load(handle)
-        logger.info(f"Tokenizer chargé depuis {tokenizer_path}")
+        tokenizer = DistilBertTokenizer.from_pretrained(tokenizer_path)
+        logger.info(f"Tokenizer BERT chargé depuis {tokenizer_path}")
         
         # Chargement de la configuration
-        config_path = os.path.join('models', 'model_config.pickle')
-        with open(config_path, 'rb') as handle:
-            config = pickle.load(handle)
-        logger.info(f"Configuration chargée depuis {config_path}")
+        config = {'max_sequence_length': 64}
+        logger.info("Configuration BERT chargée")
         
         return model, tokenizer, config
     except Exception as e:
-        logger.error(f"Erreur lors du chargement du modèle: {str(e)}")
+        logger.error(f"Erreur lors du chargement du modèle BERT: {str(e)}")
         logger.error(traceback.format_exc())
         raise
 
@@ -122,17 +120,26 @@ def send_to_appinsights(tweet, prediction, is_incorrect=False):
         logger.error(f"Erreur lors de l'envoi à Application Insights: {str(e)}")
 
 # Initialisation du modèle et du tokenizer
-model, tokenizer, config = load_sentiment_model()
-MAX_SEQUENCE_LENGTH = config.get('max_sequence_length', 50)
+try:
+    model, tokenizer, config = load_bert_model()
+    MAX_SEQUENCE_LENGTH = config.get('max_sequence_length', 64)
+    logger.info(f"Modèle BERT initialisé avec sequence_length={MAX_SEQUENCE_LENGTH}")
+except Exception as e:
+    logger.error(f"Erreur lors de l'initialisation du modèle: {str(e)}")
+    logger.error("Le serveur va démarrer mais les prédictions ne seront pas disponibles jusqu'à ce que le modèle soit chargé correctement.")
+    model = None
+    tokenizer = None
+    MAX_SEQUENCE_LENGTH = 64
 
 @app.route('/health', methods=['GET'])
 def health_check():
     """
     Endpoint de vérification de l'état de l'API
     """
+    status = "healthy" if model is not None and tokenizer is not None else "degraded"
     return jsonify({
-        "status": "healthy",
-        "model": "sentiment_analysis",
+        "status": status,
+        "model": "BERT_sentiment_analysis",
         "version": "1.0.0"
     })
 
@@ -142,6 +149,12 @@ def predict():
     Endpoint pour la prédiction du sentiment d'un tweet
     """
     try:
+        # Vérification que le modèle est chargé
+        if model is None or tokenizer is None:
+            return jsonify({
+                "error": "Le modèle n'est pas initialisé correctement"
+            }), 503
+        
         # Récupération des données
         data = request.get_json(force=True)
         tweet = data.get('tweet', '')
@@ -154,14 +167,26 @@ def predict():
         # Prétraitement du tweet
         processed_tweet = preprocess_tweet(tweet)
         
-        # Tokenisation et padding
-        sequence = tokenizer.texts_to_sequences([processed_tweet])
-        padded_sequence = pad_sequences(sequence, maxlen=MAX_SEQUENCE_LENGTH)
+        # Tokenisation
+        inputs = tokenizer(
+            processed_tweet,
+            add_special_tokens=True,
+            max_length=MAX_SEQUENCE_LENGTH,
+            padding='max_length',
+            truncation=True,
+            return_attention_mask=True,
+            return_tensors='tf'
+        )
         
         # Prédiction
-        prediction = model.predict(padded_sequence)[0][0]
-        sentiment = "Positif" if prediction > 0.5 else "Négatif"
-        confidence = float(prediction) if prediction > 0.5 else float(1 - prediction)
+        outputs = model(inputs)
+        logits = outputs.logits
+        probabilities = tf.nn.softmax(logits, axis=1).numpy()[0]
+        predicted_class = np.argmax(probabilities)
+        
+        # Détermination du sentiment
+        sentiment = "Positif" if predicted_class == 1 else "Négatif"
+        confidence = float(probabilities[predicted_class])
         
         # Envoi de la télémétrie
         send_to_appinsights(tweet, sentiment)

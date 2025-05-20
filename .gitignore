@@ -4,6 +4,7 @@ __pycache__/
 *$py.class
 
 # Distribution / packaging
+.streamlit/secrets.toml
 .Python
 build/
 develop-eggs/
@@ -41,6 +42,7 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+.sentiment-api/
 
 # Model files
 *.h5
