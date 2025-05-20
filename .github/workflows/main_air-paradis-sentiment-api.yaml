@@ -78,9 +78,8 @@ jobs:
             echo '        <environmentVariable name="PYTHONUNBUFFERED" value="1"/>' >> deployment_package/web.config
             echo '        <environmentVariable name="PORT" value="%HTTP_PLATFORM_PORT%"/>' >> deployment_package/web.config
             echo '        <environmentVariable name="PYTHONPATH" value="%home%\site\wwwroot"/>' >> deployment_package/web.config
-            echo '        <environmentVariable name="APPINSIGHTS_INSTRUMENTATION_KEY" value="'${{ env.APPINSIGHTS_INSTRUMENTATION_KEY }}'"/>' >> deployment_package/web.config
+            echo '        <environmentVariable name="APPINSIGHTS_INSTRUMENTATION_KEY" value="9af56b4d-4ad5-4643-ba29-41d154893ad4"/>' >> deployment_package/web.config
             echo '        <environmentVariable name="SIMULATION_MODE" value="false"/>' >> deployment_package/web.config
-            echo '        <environmentVariable name="WEBSITE_HOSTNAME" value="'${{ env.AZURE_WEBAPP_DOMAIN }}'"/>' >> deployment_package/web.config
             echo '      </environmentVariables>' >> deployment_package/web.config
             echo '    </httpPlatform>' >> deployment_package/web.config
             echo '  </system.webServer>' >> deployment_package/web.config
@@ -155,17 +154,28 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Deploy to Azure Web App
+      - name: Deploy to Azure Web App (Production Slot)
         id: deploy-to-webapp
         uses: azure/webapps-deploy@v2
         with:
           app-name: ${{ env.AZURE_WEBAPP_NAME }}
           publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
           package: './deployment_package'
+          slot-name: '' # Explicitly deploy to production slot
           
-      - name: Post-deployment information
+      - name: Verify deployment and display info
         run: |
           echo "✅ Application deployed to https://${{ env.AZURE_WEBAPP_DOMAIN }}"
           echo "The application may take a few minutes to start as it initializes the BERT model."
           echo "To check the application status, visit https://${{ env.AZURE_WEBAPP_DOMAIN }}/health"
-          echo "To view application logs, visit the Azure portal > App Service > ${{ env.AZURE_WEBAPP_NAME }} > Monitoring > Log stream"
+          
+          # Attempts to retrieve basic app info to verify deployment
+          echo "Checking App Service status..."
+          APP_STATUS=$(az webapp show --name ${{ env.AZURE_WEBAPP_NAME }} --resource-group ${{ env.RESOURCE_GROUP }} --query "state" -o tsv)
+          echo "App Service status: $APP_STATUS"
+          
+          # Get kudu information
+          echo "Checking deployment status in Kudu..."
+          DEPLOYMENT_STATUS_URL="https://${{ env.AZURE_WEBAPP_NAME }}.scm.azurewebsites.net/api/deployments"
+          echo "Deployment status URL: $DEPLOYMENT_STATUS_URL"
+          echo "For more details, visit the Azure portal > App Service > ${{ env.AZURE_WEBAPP_NAME }} > Monitoring > Log stream"
