@@ -86,59 +86,7 @@ jobs:
             </system.webServer>
           </configuration>' > deployment_package/web.config
 
-      - name: 'Login to Azure'
-        uses: azure/login@v1
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
-
-      - name: Create basic action group
-        run: |
-          echo "Creating basic action group for email alerts..."
-          # Syntaxe la plus simple possible
-          az monitor action-group create \
-            --resource-group ${{ env.RESOURCE_GROUP }} \
-            --name "ModelErrorAlerts" \
-            --short-name "ModelErr"
-        continue-on-error: true
-
-      - name: Deploy App Insights alert ARM template
-        run: |
-          # Créer un fichier de template ARM pour l'alerte
-          cat > alert-template.json << EOF
-          {
-            "\$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
-            "contentVersion": "1.0.0.0",
-            "resources": [
-              {
-                "type": "microsoft.insights/components/ProactiveDetectionConfigs",
-                "apiVersion": "2018-05-01-preview",
-                "name": "${{ env.APP_INSIGHTS_NAME }}/FailureAnomaliesDetector",
-                "location": "francecentral",
-                "properties": {
-                  "enabled": true,
-                  "sendEmailsToSubscriptionOwners": true,
-                  "customEmails": ["berchet.thomas@gmail.com"]
-                }
-              }
-            ]
-          }
-          EOF
-          
-          # Déployer le template ARM
-          echo "Déploiement de l'alerte via template ARM..."
-          az deployment group create \
-            --resource-group ${{ env.RESOURCE_GROUP }} \
-            --template-file alert-template.json
-        continue-on-error: true
-
-      - name: 'Deploy to Azure Web App'
-        uses: azure/webapps-deploy@v2
-        with:
-          app-name: ${{ env.AZURE_WEBAPP_NAME }}
-          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
-          package: './deployment_package'
-
-      - name: Create app_insights.py configuration
+      - name: Create app_insights.py file
         run: |
           # Créer un fichier de configuration pour Application Insights
           cat > deployment_package/app_insights.py << EOF
@@ -152,6 +100,15 @@ jobs:
           APPINSIGHTS_INSTRUMENTATION_KEY = os.environ.get('APPINSIGHTS_INSTRUMENTATION_KEY', '9af56b4d-4ad5-4643-ba29-41d154893ad4')
           APPINSIGHTS_ENDPOINT = "https://dc.services.visualstudio.com/v2/track"
 
+          # Configuration du logging
+          logging.basicConfig(
+              level=logging.INFO,
+              format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+              handlers=[
+                  logging.FileHandler("app_insights.log"),
+                  logging.StreamHandler()
+              ]
+          )
           logger = logging.getLogger(__name__)
 
           def send_event(event_name, properties=None):
@@ -160,7 +117,7 @@ jobs:
               """
               if not APPINSIGHTS_INSTRUMENTATION_KEY:
                   logger.warning("Clé d'instrumentation Application Insights non configurée.")
-                  return
+                  return False
               
               try:
                   # Création du payload pour Application Insights
@@ -185,10 +142,10 @@ jobs:
                   response = requests.post(APPINSIGHTS_ENDPOINT, json=payload)
                   if response.status_code != 200:
                       logger.warning(f"Erreur lors de l'envoi à Application Insights: {response.status_code} - {response.text}")
+                      return False
                   else:
                       logger.info(f"Événement '{event_name}' envoyé à Application Insights")
-                  
-                  return response.status_code == 200
+                      return True
               except Exception as e:
                   logger.error(f"Erreur lors de l'envoi à Application Insights: {str(e)}")
                   return False
@@ -211,8 +168,76 @@ jobs:
               success = send_event("AppStarted", {"status": "Application démarrée avec succès"})
               print(f"Test d'envoi à Application Insights: {'Réussi' if success else 'Échoué'}")
           EOF
+
+      - name: 'Login to Azure'
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: 'Deploy to Azure Web App'
+        uses: azure/webapps-deploy@v2
+        with:
+          app-name: ${{ env.AZURE_WEBAPP_NAME }}
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          package: './deployment_package'
+
+      - name: Configure Action Group and Alert Rules
+        run: |
+          echo "Configuration des alertes Application Insights..."
           
-          # Mise à jour de l'API pour utiliser ce module
-          sed -i 's/send_to_appinsights(tweet, sentiment)/from app_insights import send_to_appinsights; send_to_appinsights(tweet, sentiment)/g' deployment_package/api.py
-          sed -i 's/send_to_appinsights(tweet, predicted_sentiment, is_incorrect=True)/from app_insights import send_to_appinsights; send_to_appinsights(tweet, predicted_sentiment, is_incorrect=True)/g' deployment_package/api.py
+          # Installer l'extension Azure CLI pour Application Insights si nécessaire
+          az extension add --name application-insights
+          
+          # Attendre 30 secondes pour s'assurer que le déploiement a terminé
+          sleep 30
+          
+          # Création du groupe d'actions avec un email
+          echo "Création du groupe d'actions..."
+          az monitor action-group create \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --name ModelErrorAlerts \
+            --short-name ModelErr \
+            --action email berchet.thomas@gmail.com EmailToAdmin
+          
+          # Création d'une alerte basée sur des requêtes de logs
+          echo "Création de l'alerte..."
+          
+          # Script PowerShell pour créer une alerte basée sur des logs Analytics
+          cat > create-alert.ps1 << 'EOL'
+          Connect-AzAccount -ServicePrincipal -Tenant "$env:ARM_TENANT_ID" -Credential (New-Object System.Management.Automation.PSCredential "$env:ARM_CLIENT_ID", (ConvertTo-SecureString "$env:ARM_CLIENT_SECRET" -AsPlainText -Force))
+          
+          $ResourceGroup = "$env:RESOURCE_GROUP"
+          $AppInsightsName = "$env:APP_INSIGHTS_NAME"
+          $AlertName = "IncorrectPredictionAlert"
+          $ActionGroupName = "ModelErrorAlerts"
+          
+          # Obtenir la référence Application Insights
+          $AppInsights = Get-AzApplicationInsights -ResourceGroupName $ResourceGroup -Name $AppInsightsName
+          
+          # Obtenir le groupe d'actions
+          $ActionGroup = Get-AzActionGroup -ResourceGroupName $ResourceGroup -Name $ActionGroupName
+          
+          # Créer l'alerte basée sur une requête de logs
+          $Query = "customEvents | where name == 'IncorrectPrediction' | count"
+          $Schedule = New-AzScheduledQueryRuleSchedule -FrequencyInMinutes 5 -TimeWindowInMinutes 5
+          $Trigger = New-AzScheduledQueryRuleTrigger -ThresholdOperator GreaterThan -Threshold 3
+          $Source = New-AzScheduledQueryRuleSource -Query $Query -DataSourceId $AppInsights.Id
+          $Aznsaction = New-AzScheduledQueryRuleAznsActionGroup -ActionGroup $ActionGroup.Id -EmailSubject "Alert from Air Paradis Sentiment Analysis"
+          $AlertingAction = New-AzScheduledQueryRuleAlertingAction -AznsAction $Aznsaction -Severity 1 -Trigger $Trigger
+          
+          New-AzScheduledQueryRule -ResourceGroupName $ResourceGroup -Location $AppInsights.Location -Name $AlertName -Enabled $true -Description "Alert on incorrect predictions" -Schedule $Schedule -Source $Source -Action $AlertingAction
+          EOL
+          
+          # Exécuter le script PowerShell
+          export ARM_TENANT_ID=$(az account show --query "tenantId" -o tsv)
+          export ARM_CLIENT_ID=$(az account show --query "user.name" -o tsv)
+          export ARM_CLIENT_SECRET="${{ secrets.AZURE_CREDENTIALS }}"
+          export RESOURCE_GROUP="${{ env.RESOURCE_GROUP }}"
+          export APP_INSIGHTS_NAME="${{ env.APP_INSIGHTS_NAME }}"
+          
+          # Installer PowerShell si nécessaire
+          which pwsh || apt-get update && apt-get install -y powershell
+          
+          # Exécuter le script PowerShell
+          pwsh -File create-alert.ps1 || echo "Erreur lors de la création de l'alerte. Continuez manuellement."
         continue-on-error: true
