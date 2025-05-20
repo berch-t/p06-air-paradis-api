@@ -7,7 +7,6 @@ on:
 
 env:
   AZURE_WEBAPP_NAME: air-paradis-sentiment-api
-  AZURE_WEBAPP_DOMAIN: air-paradis-sentiment-api-dkceasgya2cvaehc.francecentral-01.azurewebsites.net
   PYTHON_VERSION: '3.9'
   APPINSIGHTS_INSTRUMENTATION_KEY: '9af56b4d-4ad5-4643-ba29-41d154893ad4'
   RESOURCE_GROUP: 'p06-AirParadisResources'
