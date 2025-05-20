@@ -9,7 +9,8 @@ import os
 from datetime import datetime
 
 # Configuration de l'URL de l'API
-API_URL = st.secrets.get("API_URL", "http://localhost:5000")
+# Configuration de l'URL de l'API
+API_URL = st.secrets.get("API_URL", "https://air-paradis-sentiment-api-dkceasgya2cvaehc.francecentral-01.azurewebsites.net")
 
 # Chemin du fichier de sauvegarde des prédictions
 PREDICTIONS_DIR = os.path.join(os.path.expanduser("~"), ".air_paradis")
