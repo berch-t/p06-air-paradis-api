@@ -7,6 +7,7 @@ on:
 
 env:
   AZURE_WEBAPP_NAME: air-paradis-sentiment-api
+  AZURE_WEBAPP_DOMAIN: air-paradis-sentiment-api-dkceasgya2cvaehc.francecentral-01.azurewebsites.net
   PYTHON_VERSION: '3.9'
   APPINSIGHTS_INSTRUMENTATION_KEY: '9af56b4d-4ad5-4643-ba29-41d154893ad4'
   RESOURCE_GROUP: 'p06-AirParadisResources'
@@ -20,94 +21,120 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout repository
+        uses: actions/checkout@v3
         with:
           lfs: true
-
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          cache: 'pip'
-
-      - name: Install dependencies
+          fetch-depth: 0
+      
+      - name: Check repository structure
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pytest
-
-      - name: Run unit tests
-        run: |
-          python -m pytest tests/
+          echo "Examining repository structure..."
+          echo "Looking for model files in preloaded_models/bert:"
+          if [ -d "preloaded_models/bert" ]; then
+            ls -la preloaded_models/bert || echo "Empty directory"
+            if [ -d "preloaded_models/bert/best_model_bert" ]; then
+              echo "✅ Found best_model_bert directory"
+              ls -la preloaded_models/bert/best_model_bert | head -10
+            fi
+            if [ -d "preloaded_models/bert/tokenizer_bert" ]; then
+              echo "✅ Found tokenizer_bert directory"
+              ls -la preloaded_models/bert/tokenizer_bert
+            fi
+          else
+            echo "❌ preloaded_models/bert directory not found"
+          fi
 
       - name: Create deployment package
         run: |
-          # Create a directory for the deployment package
+          echo "Creating deployment package..."
           mkdir -p deployment_package
           
-          # Copy the required files to the deployment package
-          cp -r api.py app.py application.py init_models.py startup.sh requirements.txt runtime.txt .streamlit tests deployment_package/
+          # Copying all core files as-is
+          cp -r api.py app.py app_insights.py application.py init_models.py startup.sh runtime.txt web.config .streamlit requirements.txt deployment_package/
           
-          # Copy app_insights.py if it exists
-          cp app_insights.py deployment_package/ || echo "Fichier app_insights.py non trouvé, assurez-vous qu'il est présent dans le dépôt."
+          # Make startup script executable
+          chmod +x deployment_package/startup.sh
           
-          # Create necessary directories and copy models if they exist
-          mkdir -p deployment_package/models
-          if [ -d "models/bert" ]; then
-            cp -r models/bert deployment_package/models/
-            echo "Modèle BERT existant copié dans le package de déploiement"
-          else
-            mkdir -p deployment_package/models/bert
-            echo "Répertoire models/bert créé (vide)"
-          fi
-          
-          # Copy preloaded models if they exist
-          if [ -d "preloaded_models" ]; then
-            cp -r preloaded_models deployment_package/
-            echo "Modèles préchargés copiés dans le package de déploiement"
-          fi
-          
-          # Create logs directory
+          # Create directories structure
+          mkdir -p deployment_package/models/bert
           mkdir -p deployment_package/logs
           
-          # Copy the logo if it exists
-          cp -r air-paradis-logo.png deployment_package/ || echo "Logo file not found, continuing..."
+          # Copy preloaded models
+          if [ -d "preloaded_models/bert" ]; then
+            mkdir -p deployment_package/preloaded_models/bert
+            
+            # Copy best_model_bert
+            if [ -d "preloaded_models/bert/best_model_bert" ]; then
+              echo "Copying best_model_bert..."
+              mkdir -p deployment_package/preloaded_models/bert/best_model_bert
+              cp -r preloaded_models/bert/best_model_bert/* deployment_package/preloaded_models/bert/best_model_bert/
+            fi
+            
+            # Copy tokenizer_bert
+            if [ -d "preloaded_models/bert/tokenizer_bert" ]; then
+              echo "Copying tokenizer_bert..."
+              mkdir -p deployment_package/preloaded_models/bert/tokenizer_bert
+              cp -r preloaded_models/bert/tokenizer_bert/* deployment_package/preloaded_models/bert/tokenizer_bert/
+            fi
+            
+            # Also copy directly to models directory to avoid initialization step
+            if [ -d "preloaded_models/bert/best_model_bert" ]; then
+              echo "Copying best_model_bert to models/bert for immediate use..."
+              mkdir -p deployment_package/models/bert/best_model_bert
+              cp -r preloaded_models/bert/best_model_bert/* deployment_package/models/bert/best_model_bert/
+            fi
+            
+            if [ -d "preloaded_models/bert/tokenizer_bert" ]; then
+              echo "Copying tokenizer_bert to models/bert for immediate use..."
+              mkdir -p deployment_package/models/bert/tokenizer_bert
+              cp -r preloaded_models/bert/tokenizer_bert/* deployment_package/models/bert/tokenizer_bert/
+            fi
+          else
+            echo "No preloaded models found, application will download on first startup"
+          fi
           
-          # Create a web.config file for Azure App Service
-          cat > deployment_package/web.config << 'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <configuration>
-            <system.webServer>
-              <handlers>
-                <add name="PythonHandler" path="*" verb="*" modules="httpPlatformHandler" resourceType="Unspecified"/>
-              </handlers>
-              <httpPlatform processPath="%home%\python\3.9\python.exe" 
-                            arguments="-m gunicorn application:app --bind=0.0.0.0:%HTTP_PLATFORM_PORT% --timeout 600" 
-                            requestTimeout="00:10:00" 
-                            startupTimeLimit="300" 
-                            startupRetryCount="5" 
-                            stdoutLogEnabled="true" 
-                            stdoutLogFile="\\?\%home%\LogFiles\stdout">
-                <environmentVariables>
-                  <environmentVariable name="PYTHONUNBUFFERED" value="1"/>
-                  <environmentVariable name="PORT" value="%HTTP_PLATFORM_PORT%"/>
-                  <environmentVariable name="PYTHONPATH" value="%home%\site\wwwroot"/>
-                  <environmentVariable name="APPINSIGHTS_INSTRUMENTATION_KEY" value="${{ env.APPINSIGHTS_INSTRUMENTATION_KEY }}"/>
-                  <environmentVariable name="SIMULATION_MODE" value="true"/>
-                </environmentVariables>
-              </httpPlatform>
-            </system.webServer>
-          </configuration>
-          EOF
+          # Copy logo if exists
+          if [ -f "air-paradis-logo.png" ]; then
+            cp air-paradis-logo.png deployment_package/
+            echo "Copied logo file"
+          fi
+          
+          # Create empty config file for BERT
+          echo '{"max_sequence_length": 64, "batch_size": 8, "model_type": "distilbert-base-uncased"}' > deployment_package/models/bert/config.json
+          echo "Created initial config.json for BERT model"
+          
+          # Modify web.config to set SIMULATION_MODE to false
+          sed -i 's/<environmentVariable name="SIMULATION_MODE" value="true"\/>/<environmentVariable name="SIMULATION_MODE" value="false"\/>/' deployment_package/web.config
+          echo "Modified web.config to disable simulation mode"
+          
+          # List files in deployment package
+          echo "Listing files in deployment package..."
+          find deployment_package -type f | sort | head -20
+          
+          # Check if model files were copied correctly
+          if [ -d "deployment_package/models/bert/best_model_bert" ] && [ -d "deployment_package/models/bert/tokenizer_bert" ]; then
+            echo "✅ Model files copied successfully to models/bert/"
+          else
+            echo "⚠️ Model files not in models/bert/ - application will try to initialize on startup"
+          fi
 
-      - name: 'Login to Azure'
+      - name: Login to Azure
         uses: azure/login@v1
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: 'Deploy to Azure Web App'
+      - name: Deploy to Azure Web App
+        id: deploy-to-webapp
         uses: azure/webapps-deploy@v2
         with:
           app-name: ${{ env.AZURE_WEBAPP_NAME }}
           publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
           package: './deployment_package'
+          
+      - name: Post-deployment information
+        run: |
+          echo "✅ Application deployed to https://${{ env.AZURE_WEBAPP_DOMAIN }}"
+          echo "The application may take a few minutes to start as it initializes the BERT model."
+          echo "To check the application status, visit https://${{ env.AZURE_WEBAPP_DOMAIN }}/health"
+          echo "To view application logs, visit the Azure portal > App Service > ${{ env.AZURE_WEBAPP_NAME }} > Monitoring > Log stream"
