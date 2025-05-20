@@ -1,6 +1,5 @@
 # Docs for the Azure Web Apps Deploy action: https://github.com/Azure/webapps-deploy
 # More GitHub Actions for Azure: https://github.com/Azure/actions
-# More info on Python, GitHub Actions, and Azure App Service: https://aka.ms/python-webapps-actions
 
 name: Build and deploy Python app to Azure Web App - airparadis-sentiment-api
 
@@ -11,22 +10,22 @@ on:
   workflow_dispatch:
 
 env:
-  AZURE_WEBAPP_NAME: airparadis-sentiment-api 
-  AZURE_WEBAPP_DOMAIN: airparadis-sentiment-api-e0c8ane4fmdze5ep.francecentral-01.azurewebsites.net 
+  # Mise à jour avec l'URL exacte vue dans les logs
+  AZURE_WEBAPP_NAME: airparadis-sentiment-api
+  AZURE_WEBAPP_DOMAIN: airparadis-sentiment-api-e0c8ane4fmdze5ep.francecentral-01.azurewebsites.net
   PYTHON_VERSION: '3.9'
-  APPINSIGHTS_INSTRUMENTATION_KEY: '1d67b737-2f84-4321-acd7-aede137cdb14' 
-  #RESOURCE_GROUP: 'p06-airparadisresources'  # Mettez à jour avec votre clé
+  APPINSIGHTS_INSTRUMENTATION_KEY: '9af56b4d-4ad5-4643-ba29-41d154893ad4'
 
 jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: read #This is required for actions/checkout
+      contents: read
 
     steps:
       - uses: actions/checkout@v4
         with:
-          lfs: false  # Désactiver LFS pour éviter les erreurs de limite
+          lfs: false
 
       - name: Set up Python version
         uses: actions/setup-python@v5
@@ -146,8 +145,8 @@ jobs:
       name: 'Production'
       url: ${{ steps.deploy-to-webapp.outputs.webapp-url }}
     permissions:
-      id-token: write #This is required for requesting the JWT
-      contents: read #This is required for actions/checkout
+      id-token: write
+      contents: read
 
     steps:
       - name: Download artifact from build job
@@ -165,14 +164,25 @@ jobs:
           tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_4AF4E359F9C647D1AE5FFEEA925F02A0 }}
           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_14C88AC40F4245B181EA617610E154CD }}
 
+      # Tentative de supprimer tout verrouillage de déploiement
+      - name: Clear deployment locks
+        run: |
+          echo "Tentative de suppression des verrous de déploiement..."
+          az webapp deployment list-publishing-profiles --name ${{ env.AZURE_WEBAPP_NAME }} --output none || true
+          az webapp deployment source delete --name ${{ env.AZURE_WEBAPP_NAME }} --output none || true
+          echo "Attente de 10 secondes avant le déploiement..."
+          sleep 10
+
       - name: 'Deploy to Azure Web App'
         uses: azure/webapps-deploy@v3
         id: deploy-to-webapp
         with:
           app-name: ${{ env.AZURE_WEBAPP_NAME }}
           slot-name: 'Production'
+          clean: true  # Permet de nettoyer la destination avant le déploiement
       
       - name: Configure App Service Settings
+        if: steps.deploy-to-webapp.outcome == 'success'
         run: |
           echo "Configuration des paramètres de l'App Service..."
           
@@ -182,13 +192,13 @@ jobs:
             --settings \
             DOWNLOAD_MODELS_ON_STARTUP=true \
             WEBSITE_HTTPLOGGING_RETENTION_DAYS=7 \
-            SCM_COMMAND_IDLE_TIMEOUT=600
+            SCM_COMMAND_IDLE_TIMEOUT=600 \
+            WEBSITE_RUN_FROM_PACKAGE=0  # Désactive le mode RunFromPackage qui peut causer des conflits
           
-          # Configurer le délai de démarrage et le fichier de démarrage
+          # Configurer le fichier de démarrage
           az webapp config set \
             --name ${{ env.AZURE_WEBAPP_NAME }} \
-            --startup-file "startup.sh" \
-            --generic-configurations '{"maxPendingConnections": 1000}'
+            --startup-file "startup.sh"
           
           echo "Configuration terminée."
           
