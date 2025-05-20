@@ -90,33 +90,74 @@ jobs:
         uses: azure/login@v1
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
-          
-      - name: Create Action Group for Alerts
+
+      - name: Create Action Group
         run: |
-          # Create action group
-          echo "Creating Action Group for alerts..."
-          ACTION_GROUP_ID=$(az monitor action-group create \
-            --name "ModelErrorAlerts" \
+          echo "Creating email action group..."
+          az monitor action-group create \
             --resource-group ${{ env.RESOURCE_GROUP }} \
-            --action email berch-t@gmail.com \
+            --name "ModelErrorAlerts" \
             --short-name "ModelErr" \
-            --query id -o tsv)
-          echo "Action Group created with ID: $ACTION_GROUP_ID"
+            --email-receiver name="AdminEmail" email-address="berch-t@gmail.com"
         continue-on-error: true
 
-      - name: Set up App Insights alert rule
+      - name: Check if App Insights logs exist
+        id: check_logs
         run: |
-          # Set up alert rule for consecutive errors
-          echo "Setting up Application Insights alert rule for model errors..."
-          az monitor metrics alert create \
-            --name "ConsecutiveModelErrors" \
+          echo "Vérification des logs Application Insights..."
+          # Vérifier si des événements existent déjà dans Application Insights
+          EVENTS_COUNT=$(az monitor app-insights events query \
+            --app ${{ env.APP_INSIGHTS_NAME }} \
             --resource-group ${{ env.RESOURCE_GROUP }} \
+            --analytics-query "customEvents | count" \
+            --query "tables[0].rows[0][0]" \
+            --output tsv || echo "0")
+          
+          echo "EVENTS_COUNT=$EVENTS_COUNT"
+          if [ "$EVENTS_COUNT" -gt "0" ]; then
+            echo "Des événements existent dans Application Insights."
+            echo "::set-output name=logs_exist::true"
+          else
+            echo "Aucun événement trouvé dans Application Insights."
+            echo "::set-output name=logs_exist::false"
+          fi
+        continue-on-error: true
+
+      - name: Set up App Insights log-based alert
+        if: steps.check_logs.outputs.logs_exist == 'true'
+        run: |
+          echo "Setting up log-based alert for incorrect predictions..."
+          
+          # Création d'une alerte basée sur les logs
+          az monitor scheduled-query create \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --name "IncorrectPredictionsAlert" \
+            --description "Alert when three or more incorrect predictions occur in 5 minutes" \
             --scopes ${{ secrets.APPINSIGHTS_RESOURCE_ID }} \
-            --condition "count IncorrectPrediction > 3" \
-            --description "Alert when the model makes more than 3 incorrect predictions" \
+            --condition "count from customEvents where name == 'IncorrectPrediction' > 3" \
             --evaluation-frequency 5m \
             --window-size 5m \
-            --severity 2
+            --severity 2 \
+            --action-groups ModelErrorAlerts
+        continue-on-error: true
+
+      - name: Create Custom Metrics Alert (Fallback)
+        if: steps.check_logs.outputs.logs_exist != 'true'
+        run: |
+          echo "Setting up custom event alert..."
+          
+          # Création d'une alerte sur les métriques personnalisées
+          # Cette approche permet de créer l'alerte même si aucun événement n'a encore été envoyé
+          az monitor metrics alert create \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --name "IncorrectPredictionsAlert" \
+            --description "Alert when three or more incorrect predictions occur" \
+            --scopes ${{ secrets.APPINSIGHTS_RESOURCE_ID }} \
+            --condition "count requests where request.resultCode == 'IncorrectPrediction' >= 3" \
+            --evaluation-frequency 5m \
+            --window-size 5m \
+            --severity 2 \
+            --action-group ModelErrorAlerts
         continue-on-error: true
 
       - name: 'Deploy to Azure Web App'
