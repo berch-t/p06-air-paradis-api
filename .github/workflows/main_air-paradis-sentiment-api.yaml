@@ -12,6 +12,9 @@ env:
   APPINSIGHTS_INSTRUMENTATION_KEY: '9af56b4d-4ad5-4643-ba29-41d154893ad4'
   RESOURCE_GROUP: 'p06-AirParadisResources'
   APP_INSIGHTS_NAME: 'air-paradis-sentiment-monitoring'
+  # Informations FTPS exactes
+  FTPS_ENDPOINT: ftps://waws-prod-par-013.ftp.azurewebsites.windows.net/site/wwwroot
+  FTPS_USERNAME: air-paradis-sentiment-api\$air-paradis-sentiment-api
 
 permissions:
   contents: read
@@ -24,7 +27,7 @@ jobs:
       - name: Checkout repository (without LFS)
         uses: actions/checkout@v3
         with:
-          lfs: false  # D'abord sans LFS pour éviter l'erreur
+          lfs: false  # Éviter l'erreur de limite LFS
           fetch-depth: 0
       
       - name: Create deployment package
@@ -59,8 +62,9 @@ jobs:
           # Make startup script executable
           chmod +x deployment_package/startup.sh
           
-          # Create directories structure
-          mkdir -p deployment_package/models/bert
+          # Create directories structure that the app expects
+          mkdir -p deployment_package/models/bert/best_model_bert
+          mkdir -p deployment_package/models/bert/tokenizer_bert
           mkdir -p deployment_package/logs
           
           # Create config file for BERT
@@ -76,7 +80,7 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Deploy to Azure Web App
+      - name: Deploy code to Azure Web App
         id: deploy-to-webapp
         uses: azure/webapps-deploy@v2
         with:
@@ -84,47 +88,40 @@ jobs:
           publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
           package: './deployment_package'
           
-      - name: Upload Models to Azure Web App
+      - name: Install LFTP
         run: |
-          echo "Preparing to upload models directly to Azure Web App via FTPS..."
+          sudo apt-get update
+          sudo apt-get install -y lftp
           
-          # Configuration pour FTP
-          APP_NAME="${{ env.AZURE_WEBAPP_NAME }}"
-          RESOURCE_GROUP="${{ env.RESOURCE_GROUP }}"
+      - name: Upload Models to Azure Via LFTP
+        run: |
+          echo "Preparing models for upload to Azure Web App..."
           
-          # Get publish profile credentials
-          PUBLISH_PROFILE=$(echo '${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}' | grep -oP '(?<=userName=")[^"]*|(?<=userPWD=")[^"]*' | head -2)
-          FTP_USERNAME=$(echo "$PUBLISH_PROFILE" | head -1)
-          FTP_PASSWORD=$(echo "$PUBLISH_PROFILE" | tail -1)
-          FTP_HOST=$(echo "${{ env.AZURE_WEBAPP_DOMAIN }}" | sed 's/\.azurewebsites\.net/.ftp.azurewebsites.windows.net/')
+          # Création d'un dossier pour organiser les modèles à uploader
+          mkdir -p upload/models/bert
           
-          # Créer un script pour transférer les modèles via FTP sécurisé
-          echo "Creating credentials file for FTP..."
-          echo "machine $FTP_HOST login $FTP_USERNAME password $FTP_PASSWORD" > ~/.netrc
-          chmod 600 ~/.netrc
-          
-          echo "Setting up models directory for upload..."
-          if [ -d "models/bert" ]; then
-            echo "Models directory found locally, using these files"
-            mkdir -p upload_models/models/bert
-            cp -r models/bert/* upload_models/models/bert/
-          elif [ -d "preloaded_models/bert" ]; then
-            echo "Using preloaded models directory"
-            mkdir -p upload_models/models/bert
-            cp -r preloaded_models/bert/* upload_models/models/bert/
-          else
-            echo "WARNING: No model files found locally"
+          # Préparation des modèles locaux
+          if [ -d "preloaded_models/bert/best_model_bert" ]; then
+            echo "Copying best_model_bert files for upload..."
+            mkdir -p upload/models/bert/best_model_bert
+            cp -r preloaded_models/bert/best_model_bert/* upload/models/bert/best_model_bert/
           fi
           
-          if [ -d "upload_models" ]; then
-            echo "Starting model upload..."
-            # Utiliser CURL pour télécharger le dossier models via FTP
-            cd upload_models
-            find . -type f -exec curl -T {} -u $FTP_USERNAME:$FTP_PASSWORD ftps://$FTP_HOST/site/wwwroot/{} --ssl \;
-            echo "Model upload completed"
-          else
-            echo "No models to upload"
+          if [ -d "preloaded_models/bert/tokenizer_bert" ]; then
+            echo "Copying tokenizer_bert files for upload..."
+            mkdir -p upload/models/bert/tokenizer_bert
+            cp -r preloaded_models/bert/tokenizer_bert/* upload/models/bert/tokenizer_bert/
           fi
+          
+          # Utilisation de LFTP pour télécharger avec les informations FTPS correctes
+          echo "Starting FTPS upload to Azure using LFTP..."
+          lftp -c "set ssl:verify-certificate no; \
+                  open ${{ env.FTPS_ENDPOINT }}; \
+                  user ${{ secrets.AZURE_PUBLISH_USERNAME }} ${{ secrets.AZURE_PUBLISH_PASSWORD }}; \
+                  mirror -R upload/ .; \
+                  bye"
+          
+          echo "FTPS upload completed"
           
       - name: Post-deployment information
         run: |
