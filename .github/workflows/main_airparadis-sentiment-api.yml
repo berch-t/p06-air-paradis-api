@@ -10,6 +10,13 @@ on:
       - main
   workflow_dispatch:
 
+env:
+  AZURE_WEBAPP_NAME: airparadis-sentiment-api 
+  AZURE_WEBAPP_DOMAIN: airparadis-sentiment-api-e0c8ane4fmdze5ep.francecentral-01.azurewebsites.net 
+  PYTHON_VERSION: '3.9'
+  APPINSIGHTS_INSTRUMENTATION_KEY: '1d67b737-2f84-4321-acd7-aede137cdb14' 
+  #RESOURCE_GROUP: 'p06-airparadisresources'  # Mettez à jour avec votre clé
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -18,11 +25,13 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: false  # Désactiver LFS pour éviter les erreurs de limite
 
       - name: Set up Python version
         uses: actions/setup-python@v5
         with:
-          python-version: '3.9'
+          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Create and start virtual environment
         run: |
@@ -31,8 +40,93 @@ jobs:
       
       - name: Install dependencies
         run: pip install -r requirements.txt
-        
-      # Optional: Add step to run tests here (PyTest, Django test suites, etc.)
+      
+      - name: Prepare deployment package
+        run: |
+          echo "Préparation du package de déploiement..."
+          
+          # Création des répertoires nécessaires
+          mkdir -p models/bert/best_model_bert
+          mkdir -p models/bert/tokenizer_bert
+          mkdir -p logs
+          
+          # Création du fichier de configuration pour BERT
+          echo '{"max_sequence_length": 64, "batch_size": 8, "model_type": "distilbert-base-uncased"}' > models/bert/config.json
+          
+          # Création du fichier web.config
+          echo '<?xml version="1.0" encoding="utf-8"?>' > web.config
+          echo '<configuration>' >> web.config
+          echo '  <system.webServer>' >> web.config
+          echo '    <handlers>' >> web.config
+          echo '      <add name="PythonHandler" path="*" verb="*" modules="httpPlatformHandler" resourceType="Unspecified"/>' >> web.config
+          echo '    </handlers>' >> web.config
+          echo '    <httpPlatform processPath="%home%\python\3.9\python.exe" arguments="-m gunicorn application:app --bind=0.0.0.0:%HTTP_PLATFORM_PORT% --timeout 600" requestTimeout="00:10:00" startupTimeLimit="600" startupRetryCount="5" stdoutLogEnabled="true" stdoutLogFile="\\?\%home%\LogFiles\stdout">' >> web.config
+          echo '      <environmentVariables>' >> web.config
+          echo '        <environmentVariable name="PYTHONUNBUFFERED" value="1"/>' >> web.config
+          echo '        <environmentVariable name="PORT" value="%HTTP_PLATFORM_PORT%"/>' >> web.config
+          echo '        <environmentVariable name="PYTHONPATH" value="%home%\site\wwwroot"/>' >> web.config
+          echo '        <environmentVariable name="APPINSIGHTS_INSTRUMENTATION_KEY" value="'${{ env.APPINSIGHTS_INSTRUMENTATION_KEY }}'"/>' >> web.config
+          echo '        <environmentVariable name="SIMULATION_MODE" value="false"/>' >> web.config
+          echo '        <environmentVariable name="DOWNLOAD_MODELS_ON_STARTUP" value="true"/>' >> web.config
+          echo '      </environmentVariables>' >> web.config
+          echo '    </httpPlatform>' >> web.config
+          echo '  </system.webServer>' >> web.config
+          echo '</configuration>' >> web.config
+          
+          # Création du script startup.sh
+          echo '#!/bin/bash' > startup.sh
+          echo 'set -e' >> startup.sh
+          echo '' >> startup.sh
+          echo '# Variables d'"'"'environnement' >> startup.sh
+          echo 'export PYTHONUNBUFFERED=1' >> startup.sh
+          echo 'export PORT=${PORT:-8000}' >> startup.sh
+          echo 'export PYTHONPATH=$(pwd)' >> startup.sh
+          echo 'export APPINSIGHTS_INSTRUMENTATION_KEY=${APPINSIGHTS_INSTRUMENTATION_KEY}' >> startup.sh
+          echo 'export DOWNLOAD_MODELS_ON_STARTUP=${DOWNLOAD_MODELS_ON_STARTUP:-true}' >> startup.sh
+          echo '' >> startup.sh
+          echo '# Création des répertoires nécessaires' >> startup.sh
+          echo 'mkdir -p logs' >> startup.sh
+          echo 'mkdir -p models/bert' >> startup.sh
+          echo '' >> startup.sh
+          echo '# Journalisation du démarrage' >> startup.sh
+          echo 'echo "== Démarrage de l'"'"'application ==" > logs/startup.log' >> startup.sh
+          echo 'echo "Python: $(python --version)" >> logs/startup.log' >> startup.sh
+          echo 'echo "Répertoire de travail: $(pwd)" >> logs/startup.log' >> startup.sh
+          echo 'echo "Date et heure: $(date)" >> logs/startup.log' >> startup.sh
+          echo '' >> startup.sh
+          echo '# Installation des dépendances si nécessaire' >> startup.sh
+          echo 'if [ ! -f ".dependencies_installed" ]; then' >> startup.sh
+          echo '    echo "Installation des packages requis..." >> logs/startup.log' >> startup.sh
+          echo '    python -m pip install -r requirements.txt || true' >> startup.sh
+          echo '    touch .dependencies_installed' >> startup.sh
+          echo 'fi' >> startup.sh
+          echo '' >> startup.sh
+          echo '# Téléchargement des modèles si activé' >> startup.sh
+          echo 'if [ "$DOWNLOAD_MODELS_ON_STARTUP" = "true" ]; then' >> startup.sh
+          echo '    echo "Téléchargement des modèles activé" >> logs/startup.log' >> startup.sh
+          echo '    python init_models.py >> logs/startup.log 2>&1 || true' >> startup.sh
+          echo '    echo "Initialisation du modèle terminée" >> logs/startup.log' >> startup.sh
+          echo 'else' >> startup.sh
+          echo '    echo "Téléchargement des modèles désactivé" >> logs/startup.log' >> startup.sh
+          echo 'fi' >> startup.sh
+          echo '' >> startup.sh
+          echo '# Vérification de la présence des modèles' >> startup.sh
+          echo 'if [ -d "models/bert/best_model_bert" ] && [ -d "models/bert/tokenizer_bert" ]; then' >> startup.sh
+          echo '    echo "Modèles BERT correctement initialisés" >> logs/startup.log' >> startup.sh
+          echo '    export SIMULATION_MODE=false' >> startup.sh
+          echo 'else' >> startup.sh
+          echo '    echo "Modèles BERT non trouvés, démarrage en mode simulation" >> logs/startup.log' >> startup.sh
+          echo '    export SIMULATION_MODE=true' >> startup.sh
+          echo 'fi' >> startup.sh
+          echo '' >> startup.sh
+          echo '# Démarrage de l'"'"'application' >> startup.sh
+          echo 'echo "== Démarrage du serveur API ==" >> logs/startup.log' >> startup.sh
+          echo 'exec gunicorn --bind=0.0.0.0:$PORT --timeout 600 --access-logfile logs/access.log --error-logfile logs/error.log application:app' >> startup.sh
+          
+          # Rendre le script exécutable
+          chmod +x startup.sh
+          
+          echo "Package de déploiement prêt."
 
       - name: Zip artifact for deployment
         run: zip release.zip ./* -r
@@ -63,7 +157,6 @@ jobs:
 
       - name: Unzip artifact for deployment
         run: unzip release.zip
-
       
       - name: Login to Azure
         uses: azure/login@v2
@@ -76,6 +169,32 @@ jobs:
         uses: azure/webapps-deploy@v3
         id: deploy-to-webapp
         with:
-          app-name: 'airparadis-sentiment-api'
+          app-name: ${{ env.AZURE_WEBAPP_NAME }}
           slot-name: 'Production'
+      
+      - name: Configure App Service Settings
+        run: |
+          echo "Configuration des paramètres de l'App Service..."
           
+          # Définir les paramètres d'application
+          az webapp config appsettings set \
+            --name ${{ env.AZURE_WEBAPP_NAME }} \
+            --settings \
+            DOWNLOAD_MODELS_ON_STARTUP=true \
+            WEBSITE_HTTPLOGGING_RETENTION_DAYS=7 \
+            SCM_COMMAND_IDLE_TIMEOUT=600
+          
+          # Configurer le délai de démarrage et le fichier de démarrage
+          az webapp config set \
+            --name ${{ env.AZURE_WEBAPP_NAME }} \
+            --startup-file "startup.sh" \
+            --generic-configurations '{"maxPendingConnections": 1000}'
+          
+          echo "Configuration terminée."
+          
+      - name: Post-deployment information
+        run: |
+          echo "✅ Application déployée sur https://${{ env.AZURE_WEBAPP_DOMAIN }}"
+          echo "L'application va automatiquement télécharger les modèles BERT au démarrage."
+          echo "Ce processus peut prendre jusqu'à 10 minutes."
+          echo "Pour vérifier l'état de l'application, visitez https://${{ env.AZURE_WEBAPP_DOMAIN }}/health"
